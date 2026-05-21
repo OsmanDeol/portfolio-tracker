@@ -206,12 +206,37 @@ body.light .ticker-strip{background:rgba(255,255,255,.92)}
              onkeydown="if(event.key==='Enter')document.getElementById('l-pass').focus()"/>
     </div>
     <div class="fg">
-      <label>Password</label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+        <label style="margin:0">Password</label>
+        <button onclick="showTab('forgot')" style="background:none;border:none;color:var(--acc);
+          font-size:11px;font-weight:600;cursor:pointer;padding:0;font-family:inherit">
+          Forgot password?
+        </button>
+      </div>
       <input type="password" id="l-pass" placeholder="Enter your password" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')doLogin()"/>
     </div>
     <button class="submit-btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
     <div class="msg err" id="l-err"></div>
+  </div>
+
+  <!-- FORGOT PASSWORD FORM -->
+  <div id="formForgot" style="display:none">
+    <p style="font-size:13px;color:var(--txt2);margin-bottom:18px;line-height:1.6">
+      Enter your username or email address and we'll send you a link to reset your password.
+    </p>
+    <div class="fg">
+      <label>Username or Email</label>
+      <input type="text" id="f-user" placeholder="username or email@example.com"
+             onkeydown="if(event.key==='Enter')doForgot()"/>
+    </div>
+    <button class="submit-btn" id="forgotBtn" onclick="doForgot()">Send Reset Link →</button>
+    <div class="msg err" id="f-err"></div>
+    <div class="msg ok"  id="f-ok"></div>
+    <div style="text-align:center;margin-top:14px">
+      <button onclick="showTab('login')" style="background:none;border:none;color:var(--txt2);
+        font-size:12px;cursor:pointer;font-family:inherit">← Back to Sign In</button>
+    </div>
   </div>
 
   <!-- REGISTER FORM -->
@@ -269,14 +294,15 @@ document.getElementById('themeBtn').addEventListener('click',()=>{
 
 /* ── Tabs ── */
 function showTab(tab) {
-  const isL = tab==='login';
-  document.getElementById('formLogin').style.display    = isL ? 'block' : 'none';
-  document.getElementById('formRegister').style.display = isL ? 'none'  : 'block';
-  document.getElementById('tabLogin').classList.toggle('active', isL);
-  document.getElementById('tabRegister').classList.toggle('active', !isL);
-  setTimeout(()=>{
-    document.getElementById(isL?'l-user':'r-user').focus();
-  }, 60);
+  document.getElementById('formLogin').style.display    = tab==='login'    ? 'block' : 'none';
+  document.getElementById('formRegister').style.display = tab==='register' ? 'block' : 'none';
+  document.getElementById('formForgot').style.display   = tab==='forgot'   ? 'block' : 'none';
+  document.getElementById('tabLogin').classList.toggle('active',    tab==='login');
+  document.getElementById('tabRegister').classList.toggle('active', tab==='register');
+  // Hide tab pills when showing forgot form
+  document.querySelector('.tab-row').style.display = tab==='forgot' ? 'none' : 'flex';
+  const focusMap = {login:'l-user', register:'r-user', forgot:'f-user'};
+  setTimeout(()=>document.getElementById(focusMap[tab])?.focus(), 60);
 }
 
 /* ── Login ── */
@@ -339,6 +365,27 @@ function showMsg(el, msg, isOk=false) {
 async function post(url, body) {
   const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   return r.json();
+}
+
+/* ── Forgot password ── */
+async function doForgot() {
+  const btn   = document.getElementById('forgotBtn');
+  const errEl = document.getElementById('f-err');
+  const okEl  = document.getElementById('f-ok');
+  const val   = document.getElementById('f-user').value.trim();
+  errEl.classList.remove('show'); okEl.classList.remove('show');
+  if (!val) { showMsg(errEl,'Enter your username or email.'); return; }
+  btn.disabled=true; btn.textContent='Sending…';
+  try {
+    const r = await post('/forgot-password', {username_or_email: val});
+    if (r.success) {
+      showMsg(okEl,'✓ If that account exists, a reset link has been sent to its email address.');
+      btn.textContent='Sent!';
+    } else {
+      showMsg(errEl, r.error||'Something went wrong.');
+      btn.disabled=false; btn.textContent='Send Reset Link →';
+    }
+  } catch(e) { showMsg(errEl,'Network error.'); btn.disabled=false; btn.textContent='Send Reset Link →'; }
 }
 
 /* ── Decorative ticker strip ── */

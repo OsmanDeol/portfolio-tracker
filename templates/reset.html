@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Reset Password — Portfolio Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#04080f;--bg2:#0b1120;--bg3:#101828;--bg4:#151f32;
+  --border:#1a2844;--border2:#2a3f68;
+  --acc:#00c8f0;--acc2:#0095bb;--acc-glow:0 0 28px rgba(0,200,240,.35);
+  --gain:#00e676;--loss:#ff4f4f;
+  --txt:#dde6f5;--txt2:#7b92b8;--txt3:#3d5070;
+}
+html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--txt)}
+body{display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+.bg-grid{position:fixed;inset:0;
+  background-image:linear-gradient(rgba(0,200,240,.04)1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,200,240,.04)1px,transparent 1px);
+  background-size:40px 40px;pointer-events:none;z-index:0}
+.bg-glow{position:fixed;width:500px;height:500px;
+  background:radial-gradient(circle,rgba(0,200,240,.08)0%,transparent 70%);
+  top:-100px;left:-100px;pointer-events:none;z-index:0}
+.card{
+  position:relative;z-index:1;background:var(--bg2);border:1px solid var(--border2);
+  border-radius:14px;padding:40px 36px;width:420px;max-width:96vw;
+  box-shadow:0 32px 80px rgba(0,0,0,.55);animation:rise .3s ease-out;
+}
+@keyframes rise{from{transform:translateY(20px);opacity:0}to{transform:none;opacity:1}}
+.logo{text-align:center;margin-bottom:28px}
+.logo-icon{width:52px;height:52px;background:linear-gradient(135deg,#00c8f0,#0066aa);
+  border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+  margin-bottom:12px;box-shadow:var(--acc-glow)}
+.logo-icon svg{width:28px;height:28px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.logo-title{font-size:20px;font-weight:800;letter-spacing:-.3px}
+.logo-sub{font-size:13px;color:var(--txt2);margin-top:4px}
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:10px;font-weight:700;color:var(--txt2);
+  text-transform:uppercase;letter-spacing:.55px;margin-bottom:5px}
+.fg input{width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:9px;
+  color:var(--txt);padding:11px 14px;font-size:14px;font-family:'Inter',sans-serif;outline:none;
+  transition:border .16s}
+.fg input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,200,240,.12)}
+.fg input::placeholder{color:var(--txt3)}
+.pw-strength{height:3px;border-radius:2px;margin-top:6px;transition:all .3s;background:var(--border)}
+.pw-strength.w{background:#ff4f4f;width:33%}
+.pw-strength.m{background:#ffc107;width:66%}
+.pw-strength.s{background:#00e676;width:100%}
+.submit-btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+  border:none;border-radius:9px;color:#020d18;font-size:14px;font-weight:700;cursor:pointer;
+  transition:all .18s;font-family:'Inter',sans-serif;margin-top:4px}
+.submit-btn:hover{filter:brightness(1.1);box-shadow:var(--acc-glow);transform:translateY(-1px)}
+.submit-btn:disabled{opacity:.6;cursor:not-allowed;transform:none;filter:none}
+.msg{border-radius:9px;padding:10px 14px;font-size:12px;font-weight:500;
+  display:flex;align-items:center;gap:7px;margin-top:12px}
+.err{background:rgba(255,79,79,.1);border:1px solid rgba(255,79,79,.3);color:#ff7a7a}
+.ok{background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.3);color:#00e676}
+.invalid-box{text-align:center;padding:10px 0}
+.invalid-icon{font-size:48px;margin-bottom:14px}
+.invalid-box h2{font-size:20px;margin-bottom:8px}
+.invalid-box p{color:var(--txt2);font-size:13px;line-height:1.6;margin-bottom:20px}
+.link{color:var(--acc);text-decoration:none;font-weight:600}
+.link:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/></svg>
+    </div>
+    <div class="logo-title">Portfolio Tracker</div>
+  </div>
+
+  {% if valid %}
+  <!-- Valid token → show reset form -->
+  <div class="logo-sub" style="text-align:center;margin-bottom:24px;font-size:14px;color:var(--txt2)">
+    Choose a new password for your account.
+  </div>
+
+  <div class="fg">
+    <label>New Password</label>
+    <input type="password" id="pw1" placeholder="Min 6 characters" autofocus
+           oninput="checkStr(this.value)"
+           onkeydown="if(event.key==='Enter')document.getElementById('pw2').focus()"/>
+    <div class="pw-strength" id="pwbar"></div>
+  </div>
+  <div class="fg">
+    <label>Confirm New Password</label>
+    <input type="password" id="pw2" placeholder="Repeat password"
+           onkeydown="if(event.key==='Enter')doReset()"/>
+  </div>
+
+  <button class="submit-btn" id="resetBtn" onclick="doReset()">Set New Password →</button>
+  <div id="msg"></div>
+
+  {% else %}
+  <!-- Invalid / expired token -->
+  <div class="invalid-box">
+    <div class="invalid-icon">🔗</div>
+    <h2>Link Invalid or Expired</h2>
+    <p>{{ error or 'This password reset link is no longer valid. Links expire after 1 hour.' }}</p>
+    <a href="/auth" class="link">← Back to Sign In</a>
+    &nbsp;·&nbsp;
+    <a href="#" class="link" onclick="window.location='/auth';setTimeout(()=>document.querySelector('.tab-pill:last-child')?.click(),300)">
+      Request new link
+    </a>
+  </div>
+  {% endif %}
+</div>
+
+{% if valid %}
+<script>
+const TOKEN = {{ token | tojson }};
+
+function checkStr(pw) {
+  const b = document.getElementById('pwbar');
+  if (!pw)            { b.className='pw-strength'; return; }
+  if (pw.length < 6)  { b.className='pw-strength w'; return; }
+  if (pw.length < 10 && !/[^a-zA-Z0-9]/.test(pw)) { b.className='pw-strength m'; return; }
+  b.className='pw-strength s';
+}
+
+async function doReset() {
+  const btn  = document.getElementById('resetBtn');
+  const msgEl= document.getElementById('msg');
+  const pw1  = document.getElementById('pw1').value;
+  const pw2  = document.getElementById('pw2').value;
+
+  msgEl.innerHTML = '';
+  if (pw1.length < 6) { showMsg('err','Password must be at least 6 characters.'); return; }
+  if (pw1 !== pw2)    { showMsg('err',"Passwords don't match."); return; }
+
+  btn.disabled=true; btn.textContent='Saving…';
+  try {
+    const r = await fetch(`/reset-password/${TOKEN}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw1})
+    }).then(r=>r.json());
+
+    if (r.success) {
+      showMsg('ok','✓ Password updated! Redirecting to sign in…');
+      btn.textContent='Done!';
+      setTimeout(()=>window.location.href='/auth', 1800);
+    } else {
+      showMsg('err', r.error||'Something went wrong.');
+      btn.disabled=false; btn.textContent='Set New Password →';
+    }
+  } catch(e) {
+    showMsg('err','Network error. Try again.');
+    btn.disabled=false; btn.textContent='Set New Password →';
+  }
+}
+
+function showMsg(type, text) {
+  const icons = {ok:'✅', err:'❌'};
+  document.getElementById('msg').innerHTML =
+    `<div class="msg ${type}">${icons[type]} ${text}</div>`;
+}
+</script>
+{% endif %}
+</body>
+</html>

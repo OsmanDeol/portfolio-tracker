@@ -1,7 +1,12 @@
 import os
+import secrets
+import smtplib
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from functools import wraps
 
 import yfinance as yf
@@ -63,6 +68,14 @@ def init_db():
             total      REAL NOT NULL,
             trade_date TEXT,
             date       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token   TEXT    NOT NULL UNIQUE,
+            expires TEXT    NOT NULL,
+            used    INTEGER NOT NULL DEFAULT 0,
+            created TEXT    DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS realized_pnl (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +252,156 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('auth_page'))
+
+
+# ─────────────────────────────────────────────────────────
+#  EMAIL HELPER
+# ─────────────────────────────────────────────────────────
+
+def send_reset_email(to_email, username, reset_url):
+    """Send password reset email via Gmail SMTP."""
+    mail_from = os.environ.get('MAIL_FROM', '')
+    mail_pass = os.environ.get('MAIL_PASSWORD', '')
+    if not mail_from or not mail_pass:
+        return False, 'Email not configured on server.'
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'Portfolio Tracker — Password Reset'
+        msg['From']    = f'Portfolio Tracker <{mail_from}>'
+        msg['To']      = to_email
+
+        html = f"""
+        <div style="font-family:Inter,sans-serif;max-width:480px;margin:0 auto;
+                    background:#0b1120;color:#dde6f5;border-radius:12px;overflow:hidden">
+          <div style="background:linear-gradient(135deg,#00c8f0,#0066aa);padding:28px;text-align:center">
+            <div style="font-size:26px;font-weight:800;color:#fff">📈 Portfolio Tracker</div>
+          </div>
+          <div style="padding:32px">
+            <h2 style="margin:0 0 12px;font-size:20px">Hi {username},</h2>
+            <p style="color:#7b92b8;line-height:1.6;margin:0 0 24px">
+              We received a request to reset your password.<br>
+              Click the button below — this link expires in <strong style="color:#dde6f5">1 hour</strong>.
+            </p>
+            <a href="{reset_url}"
+               style="display:inline-block;background:#00c8f0;color:#020d18;
+                      font-weight:700;font-size:15px;padding:14px 32px;
+                      border-radius:8px;text-decoration:none">
+              Reset My Password →
+            </a>
+            <p style="margin:24px 0 0;font-size:12px;color:#3d5070">
+              If you didn't request this, ignore this email — your password won't change.<br>
+              Link: {reset_url}
+            </p>
+          </div>
+        </div>"""
+
+        msg.attach(MIMEText(html, 'html'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(mail_from, mail_pass)
+            smtp.sendmail(mail_from, to_email, msg.as_string())
+        return True, 'ok'
+    except Exception as e:
+        return False, str(e)
+
+
+# ─────────────────────────────────────────────────────────
+#  FORGOT / RESET PASSWORD ROUTES
+# ─────────────────────────────────────────────────────────
+
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    username_or_email = (request.json.get('username_or_email') or '').strip()
+    if not username_or_email:
+        return jsonify({'success': False, 'error': 'Enter your username or email.'})
+
+    conn = get_db()
+    user = conn.execute(
+        'SELECT * FROM users WHERE username=? OR email=?',
+        (username_or_email, username_or_email)
+    ).fetchone()
+
+    if not user:
+        conn.close()
+        # Don't reveal whether user exists — always show success message
+        return jsonify({'success': True})
+
+    if not user['email']:
+        conn.close()
+        return jsonify({
+            'success': False,
+            'error': 'No email on this account. Contact the site admin to reset.'
+        })
+
+    # Clean old tokens for this user
+    conn.execute('DELETE FROM password_resets WHERE user_id=?', (user['id'],))
+
+    token   = secrets.token_urlsafe(32)
+    expires = (datetime.utcnow() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute(
+        'INSERT INTO password_resets (user_id, token, expires) VALUES (?,?,?)',
+        (user['id'], token, expires)
+    )
+    conn.commit(); conn.close()
+
+    # Build reset URL
+    base_url  = request.host_url.rstrip('/')
+    reset_url = f'{base_url}/reset-password/{token}'
+
+    ok, err = send_reset_email(user['email'], user['username'], reset_url)
+    if not ok:
+        # Still return success so user isn't confused, but log error
+        print(f'[MAIL ERROR] {err}')
+
+    return jsonify({'success': True})
+
+
+@app.route('/reset-password/<token>', methods=['GET'])
+def reset_password_page(token):
+    conn  = get_db()
+    row   = conn.execute(
+        'SELECT * FROM password_resets WHERE token=? AND used=0', (token,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return render_template('reset.html', valid=False, token=token)
+
+    # Check expiry
+    expires = datetime.strptime(row['expires'], '%Y-%m-%d %H:%M:%S')
+    if datetime.utcnow() > expires:
+        return render_template('reset.html', valid=False, token=token,
+                               error='This link has expired. Request a new one.')
+
+    return render_template('reset.html', valid=True, token=token)
+
+
+@app.route('/reset-password/<token>', methods=['POST'])
+def do_reset_password(token):
+    new_pw = request.json.get('password', '')
+    if len(new_pw) < 6:
+        return jsonify({'success': False, 'error': 'Password must be at least 6 characters.'})
+
+    conn = get_db()
+    row  = conn.execute(
+        'SELECT * FROM password_resets WHERE token=? AND used=0', (token,)
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Invalid or already used link.'})
+
+    expires = datetime.strptime(row['expires'], '%Y-%m-%d %H:%M:%S')
+    if datetime.utcnow() > expires:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Link expired. Request a new one.'})
+
+    conn.execute(
+        'UPDATE users SET password=? WHERE id=?',
+        (generate_password_hash(new_pw), row['user_id'])
+    )
+    conn.execute('UPDATE password_resets SET used=1 WHERE token=?', (token,))
+    conn.commit(); conn.close()
+    return jsonify({'success': True})
 
 
 @app.route('/api/me')
