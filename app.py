@@ -520,8 +520,10 @@ def delete_account():
     return jsonify({'success': True})
 
 
+# Always initialise DB (works under gunicorn / PythonAnywhere too)
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     print('\n  Portfolio Tracker  —  Multi-user')
     print('  ─────────────────────────────────')
     print('  Open: http://127.0.0.1:5000\n')
