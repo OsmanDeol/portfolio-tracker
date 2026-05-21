@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: portfolio-tracker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_PATH
+        value: /var/data/portfolio.db
+    disk:
+      name: portfolio-data
+      mountPath: /var/data
+      sizeGB: 1

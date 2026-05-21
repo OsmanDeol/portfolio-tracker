@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Portfolio Tracker — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#04080f;--bg2:#0b1120;--bg3:#101828;--bg4:#151f32;
+  --border:#1a2844;--border2:#2a3f68;
+  --acc:#00c8f0;--acc2:#0095bb;--acc-glow:0 0 28px rgba(0,200,240,.35);
+  --gain:#00e676;--loss:#ff4f4f;
+  --txt:#dde6f5;--txt2:#7b92b8;--txt3:#3d5070;
+  --mono:'JetBrains Mono',monospace;
+  --r:9px;--r2:14px;
+}
+body.light{
+  --bg:#eef2f8;--bg2:#ffffff;--bg3:#e2e9f4;--bg4:#d4dfee;
+  --border:#c0d0e8;--border2:#9ab0cc;
+  --acc:#0077cc;--acc2:#005fa3;--acc-glow:0 0 20px rgba(0,119,204,.25);
+  --txt:#0d1b2e;--txt2:#445e7e;--txt3:#8aa0bc;
+}
+html,body{height:100%}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--txt);
+  display:flex;align-items:center;justify-content:center;
+  min-height:100vh;
+  position:relative;overflow:hidden;
+}
+
+/* Animated background grid */
+.bg-grid{
+  position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,200,240,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,200,240,.04) 1px, transparent 1px);
+  background-size:40px 40px;
+  pointer-events:none;z-index:0;
+}
+body.light .bg-grid{
+  background-image:
+    linear-gradient(rgba(0,119,204,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,119,204,.05) 1px, transparent 1px);
+}
+.bg-glow{
+  position:fixed;
+  width:600px;height:600px;
+  background:radial-gradient(circle, rgba(0,200,240,.08) 0%, transparent 70%);
+  top:-150px;right:-150px;pointer-events:none;z-index:0;
+  animation:drift 8s ease-in-out infinite alternate;
+}
+body.light .bg-glow{background:radial-gradient(circle, rgba(0,119,204,.07) 0%, transparent 70%)}
+@keyframes drift{0%{transform:translate(0,0)}100%{transform:translate(-40px,40px)}}
+
+/* Card */
+.card{
+  position:relative;z-index:1;
+  background:var(--bg2);
+  border:1px solid var(--border2);
+  border-radius:var(--r2);
+  padding:40px 36px;
+  width:420px;max-width:96vw;
+  box-shadow:0 32px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+  animation:rise .35s ease-out;
+}
+body.light .card{box-shadow:0 16px 48px rgba(13,27,46,.18),0 0 0 1px rgba(0,0,0,.06)}
+@keyframes rise{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+
+/* Logo */
+.logo-wrap{text-align:center;margin-bottom:28px}
+.logo-icon{
+  width:52px;height:52px;
+  background:linear-gradient(135deg,#00c8f0,#0066aa);
+  border-radius:14px;
+  display:inline-flex;align-items:center;justify-content:center;
+  margin-bottom:12px;
+  box-shadow:var(--acc-glow);
+}
+.logo-icon svg{width:28px;height:28px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.logo-title{font-size:22px;font-weight:800;letter-spacing:-.4px;color:var(--txt)}
+.logo-sub{font-size:13px;color:var(--txt2);margin-top:3px}
+
+/* Tabs */
+.tab-row{display:flex;background:var(--bg3);border-radius:var(--r);padding:3px;margin-bottom:26px}
+.tab-pill{
+  flex:1;padding:8px;border-radius:6px;border:none;
+  background:transparent;color:var(--txt2);
+  font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;
+  font-family:'Inter',sans-serif;
+}
+.tab-pill.active{background:var(--bg2);color:var(--acc);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+body.light .tab-pill.active{box-shadow:0 1px 4px rgba(0,0,0,.12)}
+
+/* Form */
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:11px;font-weight:700;color:var(--txt2);
+  text-transform:uppercase;letter-spacing:.55px;margin-bottom:5px}
+.fg input{
+  width:100%;background:var(--bg4);border:1px solid var(--border);
+  border-radius:var(--r);color:var(--txt);padding:11px 14px;
+  font-size:14px;font-family:'Inter',sans-serif;outline:none;
+  transition:border .16s,box-shadow .16s;
+}
+.fg input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,200,240,.12)}
+body.light .fg input:focus{box-shadow:0 0 0 3px rgba(0,119,204,.12)}
+.fg input::placeholder{color:var(--txt3)}
+
+/* Submit button */
+.submit-btn{
+  width:100%;padding:12px;
+  background:linear-gradient(135deg, var(--acc), var(--acc2));
+  border:none;border-radius:var(--r);
+  color:#020d18;font-size:14px;font-weight:700;
+  cursor:pointer;transition:all .18s;
+  font-family:'Inter',sans-serif;margin-top:4px;
+  letter-spacing:.2px;
+}
+body.light .submit-btn{color:#fff}
+.submit-btn:hover{filter:brightness(1.1);box-shadow:var(--acc-glow);transform:translateY(-1px)}
+.submit-btn:active{transform:none}
+.submit-btn:disabled{opacity:.6;cursor:not-allowed;transform:none;filter:none}
+
+/* Error / info */
+.msg{
+  border-radius:var(--r);padding:9px 12px;font-size:12px;
+  margin-top:12px;display:none;font-weight:500;
+}
+.msg.show{display:flex;align-items:center;gap:7px}
+.msg.err{background:rgba(255,79,79,.1);border:1px solid rgba(255,79,79,.3);color:#ff7a7a}
+.msg.ok{background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.3);color:#00e676}
+body.light .msg.err{background:rgba(217,48,37,.07);color:#c0392b}
+body.light .msg.ok{background:rgba(0,135,90,.07);color:#00875a}
+
+/* Divider */
+.divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--txt3);font-size:11px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* Footer */
+.card-footer{text-align:center;margin-top:20px;font-size:12px;color:var(--txt3)}
+.card-footer a{color:var(--acc);text-decoration:none;font-weight:600}
+.card-footer a:hover{text-decoration:underline}
+
+/* Theme toggle */
+.theme-toggle{
+  position:fixed;top:16px;right:16px;z-index:10;
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:20px;padding:5px 12px;
+  font-size:12px;font-weight:600;color:var(--txt2);
+  cursor:pointer;transition:all .16s;
+}
+.theme-toggle:hover{border-color:var(--acc);color:var(--acc)}
+
+/* Ticker strip */
+.ticker-strip{
+  position:fixed;bottom:0;left:0;right:0;
+  background:rgba(11,17,32,.9);border-top:1px solid var(--border);
+  padding:6px 0;overflow:hidden;white-space:nowrap;
+  font-family:var(--mono);font-size:11px;color:var(--txt2);
+  z-index:0;backdrop-filter:blur(4px);
+}
+body.light .ticker-strip{background:rgba(255,255,255,.92)}
+.ticker-inner{display:inline-block;animation:scroll 30s linear infinite}
+@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.t-item{display:inline-block;margin-right:36px}
+.t-up{color:#00e676}.t-dn{color:#ff4f4f}
+
+/* Password strength */
+.pw-strength{height:3px;border-radius:2px;margin-top:6px;transition:all .3s;background:var(--border)}
+.pw-strength.w{background:#ff4f4f;width:33%}
+.pw-strength.m{background:#ffc107;width:66%}
+.pw-strength.s{background:#00e676;width:100%}
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<button class="theme-toggle" id="themeBtn">☀️ Light</button>
+
+<div class="card">
+  <div class="logo-wrap">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/></svg>
+    </div>
+    <div class="logo-title">Portfolio Tracker</div>
+    <div class="logo-sub">Real-time stock portfolio management</div>
+  </div>
+
+  <!-- Tab switch -->
+  <div class="tab-row">
+    <button class="tab-pill active" id="tabLogin"    onclick="showTab('login')">Sign In</button>
+    <button class="tab-pill"        id="tabRegister" onclick="showTab('register')">Create Account</button>
+  </div>
+
+  <!-- LOGIN FORM -->
+  <div id="formLogin">
+    <div class="fg">
+      <label>Username</label>
+      <input type="text" id="l-user" placeholder="Enter your username" autocomplete="username"
+             onkeydown="if(event.key==='Enter')document.getElementById('l-pass').focus()"/>
+    </div>
+    <div class="fg">
+      <label>Password</label>
+      <input type="password" id="l-pass" placeholder="Enter your password" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()"/>
+    </div>
+    <button class="submit-btn" id="loginBtn" onclick="doLogin()">Sign In →</button>
+    <div class="msg err" id="l-err"></div>
+  </div>
+
+  <!-- REGISTER FORM -->
+  <div id="formRegister" style="display:none">
+    <div class="fg">
+      <label>Username</label>
+      <input type="text" id="r-user" placeholder="Choose a username (min 3 chars)" autocomplete="username"
+             onkeydown="if(event.key==='Enter')document.getElementById('r-email').focus()"/>
+    </div>
+    <div class="fg">
+      <label>Email <span style="color:var(--txt3);font-weight:400">(optional)</span></label>
+      <input type="email" id="r-email" placeholder="your@email.com" autocomplete="email"
+             onkeydown="if(event.key==='Enter')document.getElementById('r-pass').focus()"/>
+    </div>
+    <div class="fg">
+      <label>Password</label>
+      <input type="password" id="r-pass" placeholder="Min 6 characters" autocomplete="new-password"
+             oninput="checkStrength(this.value)"
+             onkeydown="if(event.key==='Enter')document.getElementById('r-pass2').focus()"/>
+      <div class="pw-strength" id="pw-bar"></div>
+    </div>
+    <div class="fg">
+      <label>Confirm Password</label>
+      <input type="password" id="r-pass2" placeholder="Repeat password" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter')doRegister()"/>
+    </div>
+    <button class="submit-btn" id="registerBtn" onclick="doRegister()">Create Account →</button>
+    <div class="msg err" id="r-err"></div>
+    <div class="msg ok"  id="r-ok"></div>
+  </div>
+
+  <div class="card-footer">
+    Prices powered by Yahoo Finance &nbsp;·&nbsp;
+    <span style="color:var(--acc);font-weight:600">NASDAQ &amp; NYSE</span>
+  </div>
+</div>
+
+<!-- Decorative ticker strip -->
+<div class="ticker-strip">
+  <div class="ticker-inner" id="tickerStrip"></div>
+</div>
+
+<script>
+/* ── Theme ── */
+function applyTheme(t) {
+  document.body.classList.toggle('light', t==='light');
+  const b=document.getElementById('themeBtn');
+  b.textContent = t==='light' ? '🌙 Dark' : '☀️ Light';
+  localStorage.setItem('ptTheme', t);
+}
+(function(){ applyTheme(localStorage.getItem('ptTheme')||'dark'); })();
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  applyTheme(document.body.classList.contains('light')?'dark':'light');
+});
+
+/* ── Tabs ── */
+function showTab(tab) {
+  const isL = tab==='login';
+  document.getElementById('formLogin').style.display    = isL ? 'block' : 'none';
+  document.getElementById('formRegister').style.display = isL ? 'none'  : 'block';
+  document.getElementById('tabLogin').classList.toggle('active', isL);
+  document.getElementById('tabRegister').classList.toggle('active', !isL);
+  setTimeout(()=>{
+    document.getElementById(isL?'l-user':'r-user').focus();
+  }, 60);
+}
+
+/* ── Login ── */
+async function doLogin() {
+  const btn  = document.getElementById('loginBtn');
+  const errEl= document.getElementById('l-err');
+  const user = document.getElementById('l-user').value.trim();
+  const pass = document.getElementById('l-pass').value;
+  if (!user||!pass) { showMsg(errEl,'Please fill in all fields.'); return; }
+  btn.disabled=true; btn.textContent='Signing in…';
+  errEl.classList.remove('show');
+  try {
+    const r = await post('/login', {username:user, password:pass});
+    if (r.success) { window.location.href='/'; }
+    else { showMsg(errEl, r.error||'Login failed.'); btn.disabled=false; btn.textContent='Sign In →'; }
+  } catch(e) { showMsg(errEl,'Network error. Try again.'); btn.disabled=false; btn.textContent='Sign In →'; }
+}
+
+/* ── Register ── */
+function checkStrength(pw) {
+  const bar = document.getElementById('pw-bar');
+  if (!pw) { bar.className='pw-strength'; return; }
+  if (pw.length < 6) bar.className='pw-strength w';
+  else if (pw.length < 10 && !/[^a-zA-Z0-9]/.test(pw)) bar.className='pw-strength m';
+  else bar.className='pw-strength s';
+}
+
+async function doRegister() {
+  const btn   = document.getElementById('registerBtn');
+  const errEl = document.getElementById('r-err');
+  const okEl  = document.getElementById('r-ok');
+  const user  = document.getElementById('r-user').value.trim();
+  const email = document.getElementById('r-email').value.trim();
+  const pass  = document.getElementById('r-pass').value;
+  const pass2 = document.getElementById('r-pass2').value;
+
+  errEl.classList.remove('show'); okEl.classList.remove('show');
+  if (!user)        { showMsg(errEl,'Enter a username.'); return; }
+  if (user.length<3){ showMsg(errEl,'Username must be at least 3 characters.'); return; }
+  if (!pass)        { showMsg(errEl,'Enter a password.'); return; }
+  if (pass.length<6){ showMsg(errEl,'Password must be at least 6 characters.'); return; }
+  if (pass!==pass2) { showMsg(errEl,"Passwords don't match."); return; }
+
+  btn.disabled=true; btn.textContent='Creating account…';
+  try {
+    const r = await post('/register', {username:user, email:email||null, password:pass});
+    if (r.success) {
+      showMsg(okEl, '✓ Account created! Redirecting…', true);
+      setTimeout(()=>window.location.href='/', 900);
+    } else {
+      showMsg(errEl, r.error||'Registration failed.');
+      btn.disabled=false; btn.textContent='Create Account →';
+    }
+  } catch(e) { showMsg(errEl,'Network error.'); btn.disabled=false; btn.textContent='Create Account →'; }
+}
+
+function showMsg(el, msg, isOk=false) {
+  el.textContent = msg; el.classList.add('show');
+}
+async function post(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  return r.json();
+}
+
+/* ── Decorative ticker strip ── */
+const DEMO = [
+  {t:'AAPL',p:189.30,c:1.24},{t:'MSFT',p:415.60,c:-0.32},
+  {t:'TSLA',p:248.90,c:3.15},{t:'NVDA',p:875.40,c:2.87},
+  {t:'GOOGL',p:178.20,c:-0.54},{t:'AMZN',p:192.50,c:0.91},
+  {t:'META',p:528.60,c:1.73},{t:'JPM',p:215.30,c:-0.22},
+  {t:'V',p:278.40,c:0.45},{t:'PLTR',p:28.60,c:4.22},
+];
+const html = [...DEMO,...DEMO].map(d=>{
+  const up=d.c>=0, s=up?'+':'';
+  return `<span class="t-item"><b>${d.t}</b> $${d.p.toFixed(2)} <span class="${up?'t-up':'t-dn'}">${s}${d.c}%</span></span>`;
+}).join('');
+document.getElementById('tickerStrip').innerHTML = html;
+
+/* Auto-focus */
+document.addEventListener('DOMContentLoaded',()=>document.getElementById('l-user').focus());
+</script>
+</body>
+</html>
