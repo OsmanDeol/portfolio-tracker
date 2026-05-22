@@ -438,7 +438,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
     <table class="rtbl">
       <thead><tr>
         <th>Ticker</th><th>Trade Date</th><th>Type</th><th>Shares</th>
-        <th>Price</th><th>Commission</th><th>Total</th><th>Recorded</th>
+        <th>Price</th><th>Commission</th><th>Total</th><th>Recorded</th><th>Actions</th>
       </tr></thead>
       <tbody id="ttbody"></tbody>
     </table>
@@ -483,7 +483,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
     <div class="fg-row">
       <div class="fg">
         <label>Date of Purchase</label>
-        <input type="date" id="buy-date"/>
+        <input type="date" id="buy-date" onchange="onDateChange('buy')"/>
       </div>
       <div class="fg">
         <label>Number of Shares</label>
@@ -542,7 +542,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
     <div class="fg-row">
       <div class="fg">
         <label>Date of Sale</label>
-        <input type="date" id="sell-date"/>
+        <input type="date" id="sell-date" onchange="onDateChange('sell')"/>
       </div>
       <div class="fg">
         <label>Shares to Sell</label>
@@ -630,6 +630,44 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
   </div>
 </div>
 
+<!-- ── Edit Transaction Modal ─────────────────────────────────── -->
+<div class="overlay" id="editTxnOverlay">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title"><div class="modal-dot" style="background:var(--warn)"></div>Edit Transaction</div>
+      <button class="modal-close" onclick="closeEditTxn()">✕</button>
+    </div>
+    <div class="fg-row">
+      <div class="fg">
+        <label>Trade Date</label>
+        <input type="date" id="etxn-date"/>
+      </div>
+      <div class="fg">
+        <label>Shares</label>
+        <input type="number" id="etxn-shares" min="0.001" step="any"/>
+      </div>
+    </div>
+    <div class="fg-row">
+      <div class="fg">
+        <label>Price per Share ($)</label>
+        <input type="number" id="etxn-price" min="0.001" step="any"/>
+      </div>
+      <div class="fg">
+        <label>Commission ($)</label>
+        <input type="number" id="etxn-commission" min="0" step="any"/>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--txt2);margin-top:10px;line-height:1.5">
+      ⚠️ This updates the transaction log only. To correct your actual share count or average price, use the <strong>✎ Edit</strong> button on the Positions tab.
+    </p>
+    <div class="modal-err" id="etxn-err"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditTxn()">Cancel</button>
+      <button class="btn btn-acc"   onclick="submitEditTxn()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toasts ───────────────────────────────────────────────── -->
 <div id="toasts"></div>
 
@@ -703,13 +741,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Overlay backdrop clicks
-  ['buyOverlay','sellOverlay','editOverlay','chartOverlay'].forEach(id => {
+  ['buyOverlay','sellOverlay','editOverlay','editTxnOverlay','chartOverlay'].forEach(id => {
     document.getElementById(id).addEventListener('click', e => {
       if (e.target.id === id) {
-        if (id === 'buyOverlay')   closeBuyModal();
-        if (id === 'sellOverlay')  closeSellModal();
-        if (id === 'editOverlay')  closeEditModal();
-        if (id === 'chartOverlay') closeChart();
+        if (id === 'buyOverlay')     closeBuyModal();
+        if (id === 'sellOverlay')    closeSellModal();
+        if (id === 'editOverlay')    closeEditModal();
+        if (id === 'editTxnOverlay') closeEditTxn();
+        if (id === 'chartOverlay')   closeChart();
       }
     });
   });
@@ -723,7 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeEditModal(); closeChart(); closeAlertPop(); }
+    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeEditModal(); closeEditTxn(); closeChart(); closeAlertPop(); }
   });
 });
 
@@ -733,6 +772,27 @@ function setDateDefaults() {
     const el = document.getElementById(id);
     if (el) el.value = today;
   });
+}
+
+async function onDateChange(modal) {
+  const dateVal  = document.getElementById(`${modal}-date`).value;
+  const ticker   = (document.getElementById(`${modal}-ticker`).value || '').trim().toUpperCase();
+  const priceEl  = document.getElementById(`${modal}-price`);
+  if (!dateVal || !ticker) return;
+
+  // If today — live price already shown in the preview strip, don't overwrite
+  const today = new Date().toISOString().slice(0,10);
+  if (dateVal === today) return;
+
+  try {
+    const r = await fetchJSON(`/api/historical-price/${ticker}/${dateVal}`);
+    if (r.success) {
+      priceEl.value = r.price.toFixed(4);
+      if (modal === 'buy')  updateBuyCalc();
+      else                  updateSellCalc();
+      toast('i', 'Price filled', `${ticker} closing price on ${r.actual_date}: $${r.price.toFixed(2)}`);
+    }
+  } catch { /* silently ignore */ }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1056,13 +1116,13 @@ function renderCell(id, pos, p) {
       return `<span style="color:var(--txt)">${p.name||pos.ticker}</span>`;
 
     case 'price': {
-      if (!ep) return '<span class="dim">—</span>';
-      // Label the price source during non-regular hours
-      const label = mktSt==='pre'  ? '<span class="mkt-tag pre-tag">PRE</span>'
-                  : mktSt==='post' ? '<span class="mkt-tag post-tag">POST</span>'
-                  : mktSt==='closed'? '<span class="mkt-tag close-tag">CLOSE</span>'
-                  : '';
-      return `<span class="mono" style="font-size:13px">$${ep.toFixed(2)}</span>${label}`;
+      // Always show the official market price / last close here.
+      // Pre/post prices are shown in their own dedicated columns.
+      const dp = p.display_price || p.price || 0;
+      if (!dp) return '<span class="dim">—</span>';
+      const label = (mktSt==='pre'||mktSt==='post'||mktSt==='closed')
+                  ? '<span class="mkt-tag close-tag">CLOSE</span>' : '';
+      return `<span class="mono" style="font-size:13px">$${dp.toFixed(2)}</span>${label}`;
     }
 
     case 'change': {
@@ -1697,6 +1757,60 @@ function submitEdit() {
 }
 
 /* ══════════════════════════════════════════════════════════
+   EDIT / DELETE TRANSACTION
+══════════════════════════════════════════════════════════ */
+let editTxnId = null;
+
+function openEditTxn(id, date, shares, price, commission) {
+  editTxnId = id;
+  document.getElementById('etxn-date').value       = date || '';
+  document.getElementById('etxn-shares').value     = shares;
+  document.getElementById('etxn-price').value      = parseFloat(price).toFixed(4);
+  document.getElementById('etxn-commission').value = parseFloat(commission || 0).toFixed(2);
+  document.getElementById('etxn-err').classList.remove('show');
+  document.getElementById('editTxnOverlay').classList.add('show');
+  document.getElementById('etxn-shares').focus();
+}
+
+function closeEditTxn() {
+  document.getElementById('editTxnOverlay').classList.remove('show');
+  editTxnId = null;
+}
+
+async function submitEditTxn() {
+  const shares     = parseFloat(document.getElementById('etxn-shares').value);
+  const price      = parseFloat(document.getElementById('etxn-price').value);
+  const commission = parseFloat(document.getElementById('etxn-commission').value) || 0;
+  const trade_date = document.getElementById('etxn-date').value;
+  const errEl      = document.getElementById('etxn-err');
+  errEl.classList.remove('show');
+  if (!shares || shares <= 0) { errEl.textContent='Enter valid shares.'; errEl.classList.add('show'); return; }
+  if (!price  || price  <= 0) { errEl.textContent='Enter valid price.';  errEl.classList.add('show'); return; }
+
+  const r = await fetch(`/api/transactions/${editTxnId}`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({shares, price, commission, trade_date}),
+  }).then(r => r.json());
+
+  if (r.success) {
+    toast('s', 'Updated', 'Transaction updated.');
+    closeEditTxn();
+    loadTransactions();
+  } else {
+    errEl.textContent = r.error || 'Update failed.';
+    errEl.classList.add('show');
+  }
+}
+
+async function deleteTxn(id) {
+  if (!confirm('Delete this transaction record?\n\nThis only removes the log entry — your position will not change.')) return;
+  const r = await fetch(`/api/transactions/${id}`, {method:'DELETE'}).then(r => r.json());
+  if (r.success) { toast('i','Deleted','Transaction removed.'); loadTransactions(); }
+  else           { toast('e','Error', r.error||'Delete failed.'); }
+}
+
+/* ══════════════════════════════════════════════════════════
    REALIZED P&L TAB
 ══════════════════════════════════════════════════════════ */
 async function loadRealized() {
@@ -1746,12 +1860,12 @@ async function loadTransactions() {
   const rows = await fetchJSON('/api/transactions');
   const tb   = document.getElementById('ttbody');
   if (!rows.length) {
-    tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--txt2)">No transactions yet.</td></tr>`;
+    tb.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--txt2)">No transactions yet.</td></tr>`;
     return;
   }
   tb.innerHTML = rows.map(r => {
-    const isBuy=r.type==='buy';
-    const tc=isBuy?'gain':'loss';
+    const isBuy = r.type === 'buy';
+    const dateEsc = (r.trade_date || '').replace(/'/g, '');
     return `<tr>
       <td><span class="ticker-chip" style="cursor:default">${r.ticker}</span></td>
       <td style="color:var(--txt2);font-size:11px">${r.trade_date||'—'}</td>
@@ -1761,6 +1875,10 @@ async function loadTransactions() {
       <td class="mono" style="color:var(--txt2)">$${(r.commission||0).toFixed(2)}</td>
       <td class="mono">${fmt$(r.total)}</td>
       <td style="color:var(--txt2);font-size:11px">${fmtDateTime(r.date)}</td>
+      <td><div class="act-btns">
+        <button class="ab ab-edit" onclick="openEditTxn(${r.id},'${dateEsc}',${r.shares},${r.price},${r.commission||0})" title="Edit">✎</button>
+        <button class="ab ab-del"  onclick="deleteTxn(${r.id})" title="Delete">✕</button>
+      </div></td>
     </tr>`;
   }).join('');
 }

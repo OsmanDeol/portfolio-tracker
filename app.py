@@ -284,6 +284,11 @@ def fetch_stock_data(ticker):
             'prev_close':   prev,
             'change':       chg,
             'change_pct':   chgp,
+            # display_price: always the official market price / last close
+            # (never pre/post) — shown in the Price column
+            'display_price':        price or prev,
+            # effective_price: most current price including pre/post
+            # — used for all portfolio value / P&L calculations
             'effective_price':      eff_price,
             'effective_change':     eff_chg,
             'effective_change_pct': eff_chgp,
@@ -521,6 +526,66 @@ def delete_position(ticker):
     conn = get_db()
     conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker.upper()))
     conn.commit(); conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/historical-price/<ticker>/<trade_date>')
+def historical_price(ticker, trade_date):
+    """Return the closing price of a ticker on or before the given date."""
+    try:
+        target = date.fromisoformat(trade_date)
+        start  = target - timedelta(days=7)
+        end    = target + timedelta(days=2)
+        hist   = yf.Ticker(ticker.upper()).history(start=str(start), end=str(end))
+        if hist.empty:
+            return jsonify({'success': False, 'error': 'No data found'})
+        # Convert timezone-aware index to plain dates
+        idx_dates  = [d.date() if hasattr(d, 'date') else d for d in hist.index]
+        available  = [d for d in idx_dates if d <= target]
+        if not available:
+            return jsonify({'success': False, 'error': 'No trading data on or before that date'})
+        closest    = max(available)
+        close_price = round(float(hist.iloc[idx_dates.index(closest)]['Close']), 4)
+        return jsonify({'success': True, 'price': close_price, 'actual_date': str(closest)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/transactions/<int:txn_id>', methods=['PUT'])
+def edit_transaction(txn_id):
+    uid = LOCAL_USER_ID
+    d   = request.json
+    try:
+        shares     = float(d['shares'])
+        price      = float(d['price'])
+        commission = float(d.get('commission', 0))
+        trade_date = d.get('trade_date', '')
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid data.'}), 400
+    if shares <= 0 or price <= 0:
+        return jsonify({'success': False, 'error': 'Shares and price must be positive.'}), 400
+    conn   = get_db()
+    txn    = conn.execute('SELECT type FROM transactions WHERE id=? AND user_id=?',
+                          (txn_id, uid)).fetchone()
+    if not txn:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
+    total  = shares * price + commission if txn['type'] == 'buy' else shares * price
+    conn.execute(
+        'UPDATE transactions SET shares=?,price=?,commission=?,total=?,trade_date=? WHERE id=? AND user_id=?',
+        (shares, price, commission, total, trade_date, txn_id, uid))
+    conn.commit(); conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
+def delete_transaction(txn_id):
+    uid    = LOCAL_USER_ID
+    conn   = get_db()
+    result = conn.execute('DELETE FROM transactions WHERE id=? AND user_id=?', (txn_id, uid))
+    conn.commit(); conn.close()
+    if result.rowcount == 0:
+        return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
     return jsonify({'success': True})
 
 
