@@ -214,10 +214,12 @@ def init_db():
         "ALTER TABLE transactions ADD COLUMN user_id INTEGER",
         "ALTER TABLE transactions ADD COLUMN commission REAL DEFAULT 0",
         "ALTER TABLE transactions ADD COLUMN trade_date TEXT",
+        "ALTER TABLE transactions ADD COLUMN deleted_at TEXT",
         "ALTER TABLE realized_pnl ADD COLUMN user_id INTEGER",
         "ALTER TABLE realized_pnl ADD COLUMN commission REAL DEFAULT 0",
         "ALTER TABLE realized_pnl ADD COLUMN net_profit_loss REAL",
         "ALTER TABLE realized_pnl ADD COLUMN trade_date TEXT",
+        "ALTER TABLE realized_pnl ADD COLUMN deleted_at TEXT",
         "ALTER TABLE positions ADD COLUMN user_id INTEGER",
     ]:
         try:
@@ -246,6 +248,7 @@ def recalculate_position(conn, uid, ticker):
     txns = conn.execute(
         '''SELECT type, shares, total FROM transactions
            WHERE user_id=? AND ticker=?
+             AND (deleted_at IS NULL OR deleted_at='')
            ORDER BY COALESCE(trade_date,'') ASC, id ASC''',
         (uid, ticker)
     ).fetchall()
@@ -675,9 +678,91 @@ def delete_transaction(txn_id):
         return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
     ticker   = txn['ticker']
     txn_type = txn['type']
+    # Soft-delete: move to recycle bin instead of hard delete
+    conn.execute(
+        "UPDATE transactions SET deleted_at=datetime('now') WHERE id=? AND user_id=?",
+        (txn_id, uid))
+    conn.commit()
+    # If it was a sell, also soft-delete the matching realized P&L record
+    if txn_type == 'sell':
+        conn.execute('''
+            UPDATE realized_pnl SET deleted_at=datetime('now') WHERE rowid = (
+                SELECT rowid FROM realized_pnl
+                WHERE user_id=? AND ticker=?
+                  AND ABS(shares - ?) < 0.0001
+                  AND ABS(sell_price - ?) < 0.01
+                  AND (deleted_at IS NULL OR deleted_at='')
+                ORDER BY id DESC LIMIT 1
+            )
+        ''', (uid, ticker, txn['shares'], txn['price']))
+        conn.commit()
+    # Recalculate position from remaining (non-deleted) transactions
+    recalculate_position(conn, uid, ticker)
+    conn.close()
+    return jsonify({'success': True, 'recalculated': True})
+
+
+@app.route('/api/transactions/deleted')
+def get_deleted_transactions():
+    """Return all soft-deleted (trashed) transactions."""
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM transactions WHERE user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''"
+        " ORDER BY deleted_at DESC LIMIT 200",
+        (uid,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/transactions/<int:txn_id>/restore', methods=['POST'])
+def restore_transaction(txn_id):
+    """Restore a soft-deleted transaction from the recycle bin."""
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    txn  = conn.execute(
+        "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
+        (txn_id, uid)).fetchone()
+    if not txn:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Transaction not found in trash.'}), 404
+    ticker   = txn['ticker']
+    txn_type = txn['type']
+    conn.execute('UPDATE transactions SET deleted_at=NULL WHERE id=? AND user_id=?', (txn_id, uid))
+    conn.commit()
+    # If it was a sell, also restore the matching realized P&L record
+    if txn_type == 'sell':
+        conn.execute('''
+            UPDATE realized_pnl SET deleted_at=NULL WHERE rowid = (
+                SELECT rowid FROM realized_pnl
+                WHERE user_id=? AND ticker=?
+                  AND ABS(shares - ?) < 0.0001
+                  AND ABS(sell_price - ?) < 0.01
+                  AND deleted_at IS NOT NULL AND deleted_at!=''
+                ORDER BY id DESC LIMIT 1
+            )
+        ''', (uid, ticker, txn['shares'], txn['price']))
+        conn.commit()
+    recalculate_position(conn, uid, ticker)
+    conn.close()
+    return jsonify({'success': True, 'recalculated': True})
+
+
+@app.route('/api/transactions/<int:txn_id>/permanent', methods=['DELETE'])
+def permanent_delete_transaction(txn_id):
+    """Permanently delete a transaction that is already in the recycle bin."""
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    txn  = conn.execute(
+        "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
+        (txn_id, uid)).fetchone()
+    if not txn:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Transaction not found in trash.'}), 404
+    ticker   = txn['ticker']
+    txn_type = txn['type']
     conn.execute('DELETE FROM transactions WHERE id=? AND user_id=?', (txn_id, uid))
     conn.commit()
-    # If it was a sell, also remove the matching realized P&L record
     if txn_type == 'sell':
         conn.execute('''
             DELETE FROM realized_pnl WHERE rowid = (
@@ -685,56 +770,13 @@ def delete_transaction(txn_id):
                 WHERE user_id=? AND ticker=?
                   AND ABS(shares - ?) < 0.0001
                   AND ABS(sell_price - ?) < 0.01
+                  AND deleted_at IS NOT NULL AND deleted_at!=''
                 ORDER BY id DESC LIMIT 1
             )
         ''', (uid, ticker, txn['shares'], txn['price']))
         conn.commit()
-    # Recalculate position from remaining transactions
-    recalculate_position(conn, uid, ticker)
     conn.close()
-    return jsonify({'success': True, 'recalculated': True})
-
-
-@app.route('/api/portfolio/restore/<int:pnl_id>', methods=['POST'])
-def restore_position(pnl_id):
-    """
-    Restore a sold position by re-buying at the original average buy price.
-    Uses the realized_pnl record to reconstruct the position.
-    """
-    uid  = LOCAL_USER_ID
-    conn = get_db()
-    pnl  = conn.execute('SELECT * FROM realized_pnl WHERE id=? AND user_id=?',
-                        (pnl_id, uid)).fetchone()
-    if not pnl:
-        conn.close()
-        return jsonify({'success': False, 'error': 'Record not found.'}), 404
-
-    ticker = pnl['ticker']
-    shares = pnl['shares']
-    price  = pnl['buy_price']
-    total  = shares * price
-
-    existing = conn.execute(
-        'SELECT * FROM positions WHERE user_id=? AND ticker=?', (uid, ticker)).fetchone()
-    if existing:
-        ns  = existing['shares']         + shares
-        ni  = existing['total_invested'] + total
-        nav = ni / ns
-        conn.execute(
-            'UPDATE positions SET shares=?,avg_buy_price=?,total_invested=? WHERE user_id=? AND ticker=?',
-            (ns, nav, ni, uid, ticker))
-    else:
-        conn.execute(
-            'INSERT INTO positions (user_id,ticker,shares,avg_buy_price,total_invested) VALUES (?,?,?,?,?)',
-            (uid, ticker, shares, price, total))
-
-    # Record as a buy transaction so the audit log is complete
-    conn.execute(
-        'INSERT INTO transactions (user_id,ticker,type,shares,price,commission,total,trade_date) VALUES (?,?,?,?,?,?,?,?)',
-        (uid, ticker, 'buy', shares, price, 0, total, pnl['trade_date']))
-
-    conn.commit(); conn.close()
-    return jsonify({'success': True, 'ticker': ticker, 'shares': shares, 'price': price})
+    return jsonify({'success': True})
 
 
 @app.route('/api/market-status')
@@ -754,7 +796,7 @@ def get_realized_pnl():
                COALESCE(pnl_pct, (sell_price - buy_price)
                         / NULLIF(buy_price,0) * 100)         AS pnl_pct
         FROM realized_pnl
-        WHERE user_id=?
+        WHERE user_id=? AND (deleted_at IS NULL OR deleted_at='')
         ORDER BY date DESC LIMIT 200
     ''', (uid,)).fetchall()
     conn.close()
@@ -766,7 +808,7 @@ def get_transactions():
     uid  = LOCAL_USER_ID
     conn = get_db()
     rows = conn.execute(
-        'SELECT * FROM transactions WHERE user_id=? ORDER BY date DESC LIMIT 200',
+        "SELECT * FROM transactions WHERE user_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY date DESC LIMIT 200",
         (uid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])

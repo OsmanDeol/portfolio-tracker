@@ -451,7 +451,7 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
     <table class="rtbl">
       <thead><tr>
         <th>Ticker</th><th>Date</th><th>Shares</th><th>Avg Buy</th>
-        <th>Sell Price</th><th>Current Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th><th>Actions</th>
+        <th>Sell Price</th><th>Current Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th>
       </tr></thead>
       <tbody id="rtbody"></tbody>
     </table>
@@ -468,6 +468,27 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
       </tr></thead>
       <tbody id="ttbody"></tbody>
     </table>
+  </div>
+  <!-- Recently Deleted section -->
+  <div id="deletedSection" style="display:none;margin-top:0;border-top:1px solid var(--border)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px">
+      <span style="font-size:12px;font-weight:700;color:var(--warn)">🗑 Recently Deleted</span>
+      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--loss)" onclick="emptyTrash()">Empty Trash</button>
+    </div>
+    <div class="tbl-wrap" style="max-height:220px">
+      <table class="rtbl">
+        <thead><tr>
+          <th>Ticker</th><th>Trade Date</th><th>Type</th><th>Shares</th>
+          <th>Price</th><th>Total</th><th>Deleted At</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="deletedTbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div style="padding:8px 14px">
+    <button class="btn btn-ghost" id="trashToggleBtn" style="font-size:11px;gap:5px" onclick="toggleTrash()">
+      🗑 Show Recently Deleted
+    </button>
   </div>
 </div>
 
@@ -1904,26 +1925,87 @@ async function submitEditTxn() {
   }
 }
 
-async function restorePosition(pnlId, ticker, shares, buyPrice) {
-  if (!confirm(
-    `Restore ${shares} shares of ${ticker} at $${buyPrice.toFixed(2)} avg buy price?\n\n` +
-    `This adds them back to your Positions tab as a new buy entry.`
-  )) return;
-  const r = await fetch(`/api/portfolio/restore/${pnlId}`, {method:'POST'}).then(r=>r.json());
+async function deleteTxn(id) {
+  if (!confirm('Move this transaction to the recycle bin?\n\nYou can restore it any time from "Recently Deleted".')) return;
+  const r = await fetch(`/api/transactions/${id}`, {method:'DELETE'}).then(r => r.json());
   if (r.success) {
-    toast('s', 'Position Restored', `${r.shares} × ${r.ticker} @ $${r.price.toFixed(2)} added back.`);
+    toast('i', 'Moved To Trash', 'Transaction moved to recycle bin. Click "Show Recently Deleted" to restore.');
+    loadTransactions();
+    loadPortfolio();
+    // Refresh deleted list if visible
+    if (document.getElementById('deletedSection').style.display !== 'none') loadDeletedTransactions();
+  } else {
+    toast('e', 'Error', r.error||'Delete failed.');
+  }
+}
+
+async function restoreTransaction(id) {
+  const r = await fetch(`/api/transactions/${id}/restore`, {method:'POST'}).then(r=>r.json());
+  if (r.success) {
+    toast('s', 'Restored', 'Transaction restored. Position recalculated.');
+    loadTransactions();
     loadPortfolio();
     loadRealized();
+    loadDeletedTransactions();
   } else {
     toast('e', 'Restore Failed', r.error||'Unknown error.');
   }
 }
 
-async function deleteTxn(id) {
-  if (!confirm('Delete this transaction record?\n\nThis only removes the log entry — your position will not change.')) return;
-  const r = await fetch(`/api/transactions/${id}`, {method:'DELETE'}).then(r => r.json());
-  if (r.success) { toast('i','Deleted','Transaction removed.'); loadTransactions(); }
-  else           { toast('e','Error', r.error||'Delete failed.'); }
+async function permanentDeleteTxn(id) {
+  if (!confirm('Permanently delete this transaction?\n\nThis cannot be undone.')) return;
+  const r = await fetch(`/api/transactions/${id}/permanent`, {method:'DELETE'}).then(r=>r.json());
+  if (r.success) {
+    toast('i', 'Deleted Forever', 'Transaction permanently removed.');
+    loadDeletedTransactions();
+  } else {
+    toast('e', 'Error', r.error||'Delete failed.');
+  }
+}
+
+async function emptyTrash() {
+  if (!confirm('Permanently delete ALL transactions in the recycle bin?\n\nThis cannot be undone.')) return;
+  const rows = await fetchJSON('/api/transactions/deleted');
+  await Promise.all(rows.map(r =>
+    fetch(`/api/transactions/${r.id}/permanent`, {method:'DELETE'})
+  ));
+  toast('i', 'Trash Emptied', 'All deleted transactions permanently removed.');
+  loadDeletedTransactions();
+}
+
+let _trashVisible = false;
+function toggleTrash() {
+  _trashVisible = !_trashVisible;
+  const sec = document.getElementById('deletedSection');
+  const btn = document.getElementById('trashToggleBtn');
+  sec.style.display = _trashVisible ? '' : 'none';
+  btn.textContent   = _trashVisible ? '🗑 Hide Recently Deleted' : '🗑 Show Recently Deleted';
+  if (_trashVisible) loadDeletedTransactions();
+}
+
+async function loadDeletedTransactions() {
+  const rows = await fetchJSON('/api/transactions/deleted');
+  const tb   = document.getElementById('deletedTbody');
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--txt2)">Recycle bin is empty.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = rows.map(r => {
+    const isBuy = r.type === 'buy';
+    return `<tr style="opacity:.7">
+      <td><span class="ticker-chip" style="cursor:default">${r.ticker}</span></td>
+      <td style="color:var(--txt2);font-size:11px">${r.trade_date||'—'}</td>
+      <td><span class="ab ab-${isBuy?'buy':'sell'}" style="pointer-events:none">${r.type.toUpperCase()}</span></td>
+      <td class="mono">${r.shares}</td>
+      <td class="mono">$${r.price.toFixed(2)}</td>
+      <td class="mono">${fmt$(r.total)}</td>
+      <td style="color:var(--warn);font-size:11px">${fmtDateTime(r.deleted_at)}</td>
+      <td><div class="act-btns">
+        <button class="ab ab-buy" onclick="restoreTransaction(${r.id})" title="Restore">↩ Restore</button>
+        <button class="ab ab-del" onclick="permanentDeleteTxn(${r.id})" title="Delete Forever">✕</button>
+      </div></td>
+    </tr>`;
+  }).join('');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1933,7 +2015,7 @@ async function loadRealized() {
   const rows = await fetchJSON('/api/realized-pnl');
   const tb   = document.getElementById('rtbody');
   if (!rows.length) {
-    tb.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
+    tb.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
     return;
   }
   // Fetch current prices for sold tickers in background
@@ -1972,14 +2054,13 @@ async function loadRealized() {
       <td class="mono ${gc}">${gs}${fmt$(Math.abs(gross))}</td>
       <td class="mono ${nc}">${ns}${fmt$(Math.abs(net))}</td>
       <td class="mono ${nc}">${pct>=0?'+':''}${(+pct||0).toFixed(2)}%</td>
-      <td><button class="ab ab-buy" onclick="restorePosition(${r.id},'${r.ticker}',${+r.shares||0},${+r.buy_price||0})" title="Restore this position">↩ Restore</button></td>
     </tr>`;
   }).join('') +
   `<tr style="border-top:2px solid var(--border2);font-weight:700">
-    <td colspan="8" style="color:var(--txt2);font-size:11px;padding-top:10px">Total</td>
+    <td colspan="7" style="color:var(--txt2);font-size:11px;padding-top:10px">Total</td>
     <td class="mono ${tgc}">${totGross>=0?'+':'-'}${fmt$(Math.abs(totGross))}</td>
     <td class="mono ${tnc}">${totNet  >=0?'+':'-'}${fmt$(Math.abs(totNet))}</td>
-    <td></td><td></td>
+    <td></td>
   </tr>`;
 }
 
