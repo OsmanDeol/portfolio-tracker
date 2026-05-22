@@ -1,45 +1,42 @@
 """
-Portfolio Tracker — Windows Desktop App
-Wraps the Flask web app in a native desktop window using pywebview.
-Run:  python main.py
-Build .exe:  build.bat
+Portfolio Tracker — Windows Desktop Launcher
+No pywebview / pythonnet needed.
+Opens Edge or Chrome in --app mode: looks like a native desktop app,
+no address bar, no browser chrome, just like any Windows program.
 """
 import os
 import sys
 import threading
 import time
+import subprocess
+import webbrowser
 
-# ── Path setup for PyInstaller frozen builds ───────────────
+# ── Paths ───────────────────────────────────────────────────
 if getattr(sys, 'frozen', False):
-    BASE_DIR = sys._MEIPASS
+    BASE_DIR = sys._MEIPASS          # PyInstaller temp extract folder
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.insert(0, BASE_DIR)
 
-# ── Data directory: user's Documents/PortfolioTracker ──────
 DATA_DIR = os.path.join(os.path.expanduser('~'), 'Documents', 'PortfolioTracker')
 os.makedirs(DATA_DIR, exist_ok=True)
 
-os.environ.setdefault('DB_PATH',     os.path.join(DATA_DIR, 'portfolio.db'))
-os.environ.setdefault('SECRET_KEY',  'desktop-pt-secret-!xA9kZ2mQ7nB')
-os.environ.setdefault('FLASK_ENV',   'production')
+os.environ.setdefault('DB_PATH',    os.path.join(DATA_DIR, 'portfolio.db'))
+os.environ.setdefault('SECRET_KEY', 'desktop-pt-!xA9kZ2mQ7nB-local')
 
-PORT = 5088   # Internal port; not exposed to the network
+PORT = 5088
 
-# ── Import Flask app ────────────────────────────────────────
-from app import app as flask_app   # noqa: E402  (after env vars are set)
+# ── Flask ────────────────────────────────────────────────────
+from app import app as flask_app  # noqa: E402
 
 def _run_flask():
     flask_app.run(
-        host='127.0.0.1',
-        port=PORT,
-        debug=False,
-        threaded=True,
-        use_reloader=False,
+        host='127.0.0.1', port=PORT,
+        debug=False, threaded=True, use_reloader=False,
     )
 
-def _wait_for_flask(timeout=15):
+def _wait_ready(timeout=20):
     import urllib.request
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -47,36 +44,67 @@ def _wait_for_flask(timeout=15):
             urllib.request.urlopen(f'http://127.0.0.1:{PORT}/auth', timeout=1)
             return True
         except Exception:
-            time.sleep(0.2)
+            time.sleep(0.25)
     return False
 
+# ── Find Edge or Chrome ──────────────────────────────────────
+def _find_browser():
+    candidates = [
+        # Edge (pre-installed on Windows 10/11)
+        os.path.expandvars(r'%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe'),
+        os.path.expandvars(r'%ProgramFiles%\Microsoft\Edge\Application\msedge.exe'),
+        os.path.expandvars(r'%LocalAppData%\Microsoft\Edge\Application\msedge.exe'),
+        # Chrome fallback
+        os.path.expandvars(r'%ProgramFiles%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%LocalAppData%\Google\Chrome\Application\chrome.exe'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
 
+# ── Main ─────────────────────────────────────────────────────
 if __name__ == '__main__':
-    import webview
+    print('\n  Portfolio Tracker starting…\n')
 
-    # Start Flask in a background daemon thread
     flask_thread = threading.Thread(target=_run_flask, daemon=True)
     flask_thread.start()
 
-    print('Starting Portfolio Tracker…')
-    if not _wait_for_flask():
-        print('ERROR: Flask did not start in time.')
+    if not _wait_ready():
+        print('ERROR: Flask server did not start in time.')
+        input('Press Enter to exit.')
         sys.exit(1)
 
-    # Create the native desktop window
-    window = webview.create_window(
-        title      = 'Portfolio Tracker',
-        url        = f'http://127.0.0.1:{PORT}',
-        width      = 1440,
-        height     = 880,
-        min_size   = (900, 600),
-        resizable  = True,
-        text_select= True,
-        background_color='#04080f',
-    )
+    url     = f'http://127.0.0.1:{PORT}'
+    browser = _find_browser()
 
-    webview.start(
-        debug=False,
-        # On Windows, use EdgeChromium for best rendering
-        # gui='edgechromium',   # uncomment if you want to force Edge
-    )
+    # Separate browser profile so the app window doesn't mix with
+    # the user's normal Edge / Chrome profile
+    profile_dir = os.path.join(DATA_DIR, 'browser-profile')
+
+    if browser:
+        print(f'  Opening with: {os.path.basename(browser)}')
+        proc = subprocess.Popen([
+            browser,
+            f'--app={url}',
+            '--window-size=1440,880',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-extensions',
+            f'--user-data-dir={profile_dir}',
+        ])
+        # Block until the browser window is closed, then shut down
+        proc.wait()
+    else:
+        # Ultimate fallback — open in whatever the default browser is
+        print(f'  Edge/Chrome not found. Opening {url} in default browser.')
+        webbrowser.open(url)
+        print('  Press Ctrl+C to stop the server when done.\n')
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    print('  Portfolio Tracker closed.')

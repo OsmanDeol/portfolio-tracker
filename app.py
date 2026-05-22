@@ -17,7 +17,13 @@ from flask import (Flask, jsonify, redirect, render_template,
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 
-app = Flask(__name__)
+# Support PyInstaller frozen builds — find templates next to the exe
+if getattr(sys, 'frozen', False):
+    _tmpl = os.path.join(sys._MEIPASS, 'templates')
+    app   = Flask(__name__, template_folder=_tmpl)
+else:
+    app   = Flask(__name__)
+
 CORS(app)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-in-prod-!@#xyz')
 
