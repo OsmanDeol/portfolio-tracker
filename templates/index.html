@@ -182,6 +182,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
 .ab-buy:hover{background:var(--gain);color:#04140b;border-color:var(--gain)}
 .ab-sell{background:transparent;border-color:rgba(255,79,79,.35);color:var(--loss)}
 .ab-sell:hover{background:var(--loss);color:#fff;border-color:var(--loss)}
+.ab-edit{background:transparent;border-color:rgba(0,200,240,.3);color:var(--acc)}
+.ab-edit:hover{background:var(--acc);color:#020d18;border-color:var(--acc)}
 .ab-del{background:transparent;border-color:var(--border);color:var(--txt3)}
 .ab-del:hover{border-color:var(--loss);color:var(--loss)}
 
@@ -576,6 +578,42 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
   </div>
 </div>
 
+<!-- ── Edit Position Modal ────────────────────────────────────── -->
+<div class="overlay" id="editOverlay">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title"><div class="modal-dot" style="background:var(--acc)"></div>Edit Position — <span id="edit-ticker-label">—</span></div>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+
+    <div class="fg-row">
+      <div class="fg">
+        <label>Shares Held</label>
+        <input type="number" id="edit-shares" placeholder="0" min="0.001" step="any" oninput="updateEditCalc()"/>
+      </div>
+      <div class="fg">
+        <label>Average Buy Price ($)</label>
+        <input type="number" id="edit-avg" placeholder="0.00" min="0.001" step="any" oninput="updateEditCalc()"/>
+      </div>
+    </div>
+
+    <div class="calc-strip show" id="edit-calc" style="display:flex">
+      <div class="ci"><div class="lbl">Total Invested</div><div class="val" id="ec-invested">—</div></div>
+    </div>
+
+    <p style="font-size:11px;color:var(--txt2);margin-top:12px">
+      ⚠️ This directly corrects the position — no transaction will be recorded.
+    </p>
+
+    <div class="modal-err" id="edit-err"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-acc" onclick="submitEdit()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Chart Modal (TradingView) ─────────────────────────────── -->
 <div class="overlay" id="chartOverlay">
   <div class="chart-modal-box">
@@ -665,11 +703,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Overlay backdrop clicks
-  ['buyOverlay','sellOverlay','chartOverlay'].forEach(id => {
+  ['buyOverlay','sellOverlay','editOverlay','chartOverlay'].forEach(id => {
     document.getElementById(id).addEventListener('click', e => {
       if (e.target.id === id) {
         if (id === 'buyOverlay')   closeBuyModal();
         if (id === 'sellOverlay')  closeSellModal();
+        if (id === 'editOverlay')  closeEditModal();
         if (id === 'chartOverlay') closeChart();
       }
     });
@@ -684,7 +723,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeChart(); closeAlertPop(); }
+    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeEditModal(); closeChart(); closeAlertPop(); }
   });
 });
 
@@ -1094,6 +1133,7 @@ function renderCell(id, pos, p) {
       return `<div class="act-btns">
         <button class="ab ab-buy"  onclick="event.stopPropagation();openBuyModal('${pos.ticker}')">+Buy</button>
         <button class="ab ab-sell" onclick="event.stopPropagation();openSellModal('${pos.ticker}')">-Sell</button>
+        <button class="ab ab-edit" onclick="event.stopPropagation();openEditModal('${pos.ticker}')" title="Edit position">✎</button>
         <button class="ab ab-del"  onclick="event.stopPropagation();confirmDelete('${pos.ticker}')" title="Remove">✕</button>
       </div>`;
 
@@ -1600,6 +1640,60 @@ function confirmDelete(ticker) {
     .then(r=>r.json()).then(r=>{
       if(r.success){ toast('i','Removed',`${ticker} removed.`); loadPortfolio(); }
     });
+}
+
+/* ══════════════════════════════════════════════════════════
+   EDIT POSITION MODAL
+══════════════════════════════════════════════════════════ */
+let editTicker = null;
+
+function openEditModal(ticker) {
+  editTicker = ticker;
+  const pos  = portfolio.find(p => p.ticker === ticker);
+  if (!pos) return;
+  document.getElementById('edit-ticker-label').textContent = ticker;
+  document.getElementById('edit-shares').value = pos.shares;
+  document.getElementById('edit-avg').value    = pos.avg_buy_price.toFixed(4);
+  document.getElementById('edit-err').classList.remove('show');
+  updateEditCalc();
+  document.getElementById('editOverlay').classList.add('show');
+  document.getElementById('edit-shares').focus();
+}
+
+function closeEditModal() {
+  document.getElementById('editOverlay').classList.remove('show');
+  editTicker = null;
+}
+
+function updateEditCalc() {
+  const shares = parseFloat(document.getElementById('edit-shares').value) || 0;
+  const avg    = parseFloat(document.getElementById('edit-avg').value)    || 0;
+  document.getElementById('ec-invested').textContent = '$' + (shares * avg).toFixed(2);
+}
+
+function submitEdit() {
+  const shares = parseFloat(document.getElementById('edit-shares').value);
+  const avg    = parseFloat(document.getElementById('edit-avg').value);
+  const errEl  = document.getElementById('edit-err');
+  errEl.classList.remove('show');
+
+  if (!shares || shares <= 0) { errEl.textContent='Enter a valid number of shares.'; errEl.classList.add('show'); return; }
+  if (!avg    || avg    <= 0) { errEl.textContent='Enter a valid average price.';    errEl.classList.add('show'); return; }
+
+  fetch(`/api/portfolio/${editTicker}`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({shares, avg_buy_price: avg}),
+  }).then(r => r.json()).then(r => {
+    if (r.success) {
+      toast('s', 'Updated', `${editTicker} position updated.`);
+      closeEditModal();
+      loadPortfolio();
+    } else {
+      errEl.textContent = r.error || 'Update failed.';
+      errEl.classList.add('show');
+    }
+  });
 }
 
 /* ══════════════════════════════════════════════════════════

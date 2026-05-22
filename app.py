@@ -493,6 +493,28 @@ def sell():
     return jsonify({'success': True, 'profit_loss': pl, 'net_profit_loss': net_pl, 'pnl_pct': pl_pct})
 
 
+@app.route('/api/portfolio/<ticker>', methods=['PUT'])
+def edit_position(ticker):
+    uid    = LOCAL_USER_ID
+    d      = request.json
+    try:
+        shares = float(d['shares'])
+        avg    = float(d['avg_buy_price'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid data.'}), 400
+    if shares <= 0 or avg <= 0:
+        return jsonify({'success': False, 'error': 'Shares and price must be positive.'}), 400
+    total  = shares * avg
+    conn   = get_db()
+    result = conn.execute(
+        'UPDATE positions SET shares=?, avg_buy_price=?, total_invested=? WHERE user_id=? AND ticker=?',
+        (shares, avg, total, uid, ticker.upper()))
+    conn.commit(); conn.close()
+    if result.rowcount == 0:
+        return jsonify({'success': False, 'error': 'Position not found.'}), 404
+    return jsonify({'success': True})
+
+
 @app.route('/api/portfolio/<ticker>', methods=['DELETE'])
 def delete_position(ticker):
     uid  = LOCAL_USER_ID
