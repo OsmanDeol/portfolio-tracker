@@ -2,12 +2,14 @@ import os
 import secrets
 import smtplib
 import sqlite3
+import sys
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from flask import (Flask, jsonify, redirect, render_template,
@@ -25,6 +27,122 @@ sparkline_cache= {}
 cache_lock     = threading.Lock()
 PRICE_TTL      = 3
 SPARKLINE_TTL  = 300
+ET             = ZoneInfo('America/New_York')
+
+
+# ─────────────────────────────────────────────────────────
+#  US MARKET HOLIDAYS  (NYSE / NASDAQ)
+# ─────────────────────────────────────────────────────────
+
+def _easter(year):
+    """Return Easter Sunday for given year (Anonymous Gregorian)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19*a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2*e + 2*i - h - k) % 7
+    m = (a + 11*h + 22*l) // 451
+    month = (h + l - 7*m + 114) // 31
+    day   = (h + l - 7*m + 114) % 31 + 1
+    return date(year, month, day)
+
+def _observed(d):
+    """Shift a holiday to observed weekday if it falls on a weekend."""
+    if d.weekday() == 5: return d - timedelta(days=1)   # Sat → Fri
+    if d.weekday() == 6: return d + timedelta(days=1)   # Sun → Mon
+    return d
+
+def _nth_weekday(year, month, weekday, n):
+    """nth occurrence (1-based) of weekday in month."""
+    first = date(year, month, 1)
+    diff  = (weekday - first.weekday()) % 7
+    return first + timedelta(days=diff + 7*(n-1))
+
+def _last_weekday(year, month, weekday):
+    """Last occurrence of weekday in month."""
+    if month == 12: last = date(year+1, 1, 1) - timedelta(days=1)
+    else:           last = date(year, month+1, 1) - timedelta(days=1)
+    diff = (last.weekday() - weekday) % 7
+    return last - timedelta(days=diff)
+
+def get_market_holidays(year):
+    """Return a set of NYSE/NASDAQ holiday dates for the given year."""
+    MO, TH = 0, 3
+    hols = {
+        _observed(date(year, 1, 1)),              # New Year's Day
+        _nth_weekday(year, 1, MO, 3),             # MLK Day
+        _nth_weekday(year, 2, MO, 3),             # Presidents Day
+        _easter(year) - timedelta(days=2),        # Good Friday
+        _last_weekday(year, 5, MO),               # Memorial Day
+        _observed(date(year, 6, 19)),             # Juneteenth
+        _observed(date(year, 7, 4)),              # Independence Day
+        _nth_weekday(year, 9, MO, 1),             # Labor Day
+        _nth_weekday(year, 11, TH, 4),            # Thanksgiving
+        _observed(date(year, 12, 25)),            # Christmas
+    }
+    return hols
+
+def is_trading_day(d):
+    if d.weekday() >= 5: return False
+    return d not in get_market_holidays(d.year)
+
+def market_session(now_et=None):
+    """
+    Returns dict: status, seconds_to_next, label, next_label
+    status: 'open' | 'pre' | 'post' | 'closed'
+    """
+    if now_et is None:
+        now_et = datetime.now(ET)
+    today = now_et.date()
+
+    def dt(h, m):
+        return now_et.replace(hour=h, minute=m, second=0, microsecond=0)
+
+    pre_start  = dt(4,  0)
+    mkt_open   = dt(9, 30)
+    mkt_close  = dt(16, 0)
+    post_end   = dt(20, 0)
+
+    def next_mkt_open(from_dt):
+        d = from_dt.date()
+        t_open = from_dt.replace(hour=9, minute=30, second=0, microsecond=0)
+        if is_trading_day(d) and from_dt < t_open:
+            return t_open
+        nxt = d + timedelta(days=1)
+        while not is_trading_day(nxt):
+            nxt += timedelta(days=1)
+        return datetime(nxt.year, nxt.month, nxt.day, 9, 30, tzinfo=ET)
+
+    if not is_trading_day(today):
+        nxt = next_mkt_open(now_et)
+        secs = int((nxt - now_et).total_seconds())
+        return {'status':'closed', 'seconds_to_next': secs, 'next_label':'Market opens'}
+
+    if now_et < pre_start:
+        nxt = next_mkt_open(now_et)
+        secs = int((nxt - now_et).total_seconds())
+        return {'status':'closed', 'seconds_to_next': secs, 'next_label':'Market opens'}
+
+    if now_et < mkt_open:
+        secs = int((mkt_open - now_et).total_seconds())
+        return {'status':'pre', 'seconds_to_next': secs, 'next_label':'Market opens'}
+
+    if now_et < mkt_close:
+        secs = int((mkt_close - now_et).total_seconds())
+        return {'status':'open', 'seconds_to_next': secs, 'next_label':'Market closes'}
+
+    if now_et < post_end:
+        nxt = next_mkt_open(now_et)
+        secs = int((nxt - now_et).total_seconds())
+        return {'status':'post', 'seconds_to_next': secs, 'next_label':'Market opens'}
+
+    # After post-market
+    nxt = next_mkt_open(now_et)
+    secs = int((nxt - now_et).total_seconds())
+    return {'status':'closed', 'seconds_to_next': secs, 'next_label':'Market opens'}
 
 
 # ─────────────────────────────────────────────────────────
@@ -169,18 +287,41 @@ def fetch_stock_data(ticker):
         except Exception:
             pass
 
+        # Decide effective price based on current market session
+        sess = market_session()
+        status = sess['status']
+        if status == 'pre'  and pre_p:
+            eff_price = pre_p
+            eff_chg   = pre_p - prev
+            eff_chgp  = (eff_chg / prev * 100) if prev else 0
+        elif status == 'post' and post_p:
+            eff_price = post_p
+            eff_chg   = post_p - prev
+            eff_chgp  = (eff_chg / prev * 100) if prev else 0
+        else:
+            # Closed or regular hours — use last known price (which equals prev_close when closed)
+            eff_price = price or prev
+            eff_chg   = chg
+            eff_chgp  = chgp
+
         data = {
             'ticker': ticker,
             'name': info.get('longName') or info.get('shortName', ticker),
-            'price': price, 'prev_close': prev,
-            'change': chg, 'change_pct': chgp,
-            'pre_price': pre_p, 'pre_chg_pct': pre_cp,
-            'post_price': post_p, 'post_chg_pct': post_cp,
+            'price':        price,          # raw regular-market price
+            'prev_close':   prev,
+            'change':       chg,
+            'change_pct':   chgp,
+            'effective_price':    eff_price,   # used for portfolio valuation
+            'effective_change':   eff_chg,
+            'effective_change_pct': eff_chgp,
+            'market_status': status,
+            'pre_price':    pre_p,  'pre_chg_pct':  pre_cp,
+            'post_price':   post_p, 'post_chg_pct': post_cp,
             'earnings_date': earnings_date,
-            'day_high': info.get('dayHigh', 0),
-            'day_low':  info.get('dayLow', 0),
-            'volume':   info.get('volume', 0),
-            'exchange': info.get('exchange', 'NASDAQ'),
+            'day_high':  info.get('dayHigh', 0),
+            'day_low':   info.get('dayLow', 0),
+            'volume':    info.get('volume', 0),
+            'exchange':  info.get('exchange', 'NASDAQ'),
             'success': True,
         }
         with cache_lock:
@@ -617,14 +758,28 @@ def delete_position(ticker):
     return jsonify({'success': True})
 
 
+@app.route('/api/market-status')
+def api_market_status():
+    sess = market_session()
+    return jsonify(sess)
+
+
 @app.route('/api/realized-pnl')
 @login_required
 def realized_pnl():
     uid  = current_uid()
     conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM realized_pnl WHERE user_id=? ORDER BY date DESC LIMIT 200',
-        (uid,)).fetchall()
+    # COALESCE handles rows created before net_profit_loss column was added
+    rows = conn.execute('''
+        SELECT *,
+               COALESCE(net_profit_loss, profit_loss)       AS net_profit_loss,
+               COALESCE(commission, 0)                       AS commission,
+               COALESCE(pnl_pct, (sell_price - buy_price)
+                        / NULLIF(buy_price,0) * 100)         AS pnl_pct
+        FROM realized_pnl
+        WHERE user_id=?
+        ORDER BY date DESC LIMIT 200
+    ''', (uid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
