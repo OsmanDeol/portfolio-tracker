@@ -195,6 +195,19 @@ def init_db():
             trade_date      TEXT,
             date            TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id  INTEGER NOT NULL DEFAULT 1,
+            name     TEXT    NOT NULL DEFAULT 'Watchlist',
+            position INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS watchlist_items (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL,
+            ticker       TEXT    NOT NULL,
+            added        TEXT    DEFAULT (datetime('now')),
+            UNIQUE(watchlist_id, ticker)
+        );
     ''')
     # Safe column migrations for pre-existing DBs
     for sql in [
@@ -218,7 +231,47 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass
+    # Seed 5 default watchlists if none exist
+    count = conn.execute('SELECT COUNT(*) FROM watchlists WHERE user_id=1').fetchone()[0]
+    if count == 0:
+        for i in range(1, 6):
+            conn.execute('INSERT INTO watchlists (user_id,name,position) VALUES (?,?,?)',
+                         (1, f'Watchlist {i}', i))
+        conn.commit()
     conn.close()
+
+
+def recalculate_position(conn, uid, ticker):
+    """Replay all transactions to recompute position for a ticker (average cost method)."""
+    txns = conn.execute(
+        '''SELECT type, shares, total FROM transactions
+           WHERE user_id=? AND ticker=?
+           ORDER BY COALESCE(trade_date,'') ASC, id ASC''',
+        (uid, ticker)
+    ).fetchall()
+    shares = 0.0; invested = 0.0
+    for t in txns:
+        if t['type'] == 'buy':
+            shares   += t['shares']
+            invested += t['total']
+        elif t['type'] == 'sell' and shares > 0:
+            avg        = invested / shares
+            cost_basis = avg * min(t['shares'], shares)
+            shares     = max(0.0, shares - t['shares'])
+            invested   = max(0.0, invested - cost_basis)
+    if shares < 0.0001:
+        conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker))
+    else:
+        avg_price = invested / shares
+        conn.execute('''
+            INSERT INTO positions (user_id,ticker,shares,avg_buy_price,total_invested)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(user_id,ticker) DO UPDATE SET
+              shares=excluded.shares,
+              avg_buy_price=excluded.avg_buy_price,
+              total_invested=excluded.total_invested
+        ''', (uid, ticker, shares, avg_price, invested))
+    conn.commit()
 
 
 # ─────────────────────────────────────────────────────────
@@ -298,8 +351,16 @@ def fetch_stock_data(ticker):
             'earnings_date': earnings_date,
             'day_high':  info.get('dayHigh', 0),
             'day_low':   info.get('dayLow', 0),
+            'open_price': info.get('regularMarketOpen') or info.get('open', 0),
             'volume':    info.get('volume', 0),
             'exchange':  info.get('exchange', 'NASDAQ'),
+            'market_cap':     info.get('marketCap', 0),
+            'week_52_high':   info.get('fiftyTwoWeekHigh', 0),
+            'week_52_low':    info.get('fiftyTwoWeekLow', 0),
+            'dividend_rate':  info.get('dividendRate', 0),
+            'dividend_yield': round((info.get('dividendYield') or 0) * 100, 2),
+            'ex_div_date':    str(date.fromtimestamp(info['exDividendDate']))
+                              if info.get('exDividendDate') else None,
             'success': True,
         }
         with cache_lock:
@@ -564,29 +625,53 @@ def edit_transaction(txn_id):
         return jsonify({'success': False, 'error': 'Invalid data.'}), 400
     if shares <= 0 or price <= 0:
         return jsonify({'success': False, 'error': 'Shares and price must be positive.'}), 400
-    conn   = get_db()
-    txn    = conn.execute('SELECT type FROM transactions WHERE id=? AND user_id=?',
-                          (txn_id, uid)).fetchone()
+    conn = get_db()
+    txn  = conn.execute('SELECT * FROM transactions WHERE id=? AND user_id=?',
+                        (txn_id, uid)).fetchone()
     if not txn:
         conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
+    ticker = txn['ticker']
     total  = shares * price + commission if txn['type'] == 'buy' else shares * price
     conn.execute(
         'UPDATE transactions SET shares=?,price=?,commission=?,total=?,trade_date=? WHERE id=? AND user_id=?',
         (shares, price, commission, total, trade_date, txn_id, uid))
-    conn.commit(); conn.close()
-    return jsonify({'success': True})
+    conn.commit()
+    # Recalculate position from all transactions for this ticker
+    recalculate_position(conn, uid, ticker)
+    conn.close()
+    return jsonify({'success': True, 'recalculated': True})
 
 
 @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
 def delete_transaction(txn_id):
-    uid    = LOCAL_USER_ID
-    conn   = get_db()
-    result = conn.execute('DELETE FROM transactions WHERE id=? AND user_id=?', (txn_id, uid))
-    conn.commit(); conn.close()
-    if result.rowcount == 0:
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    txn  = conn.execute('SELECT * FROM transactions WHERE id=? AND user_id=?',
+                        (txn_id, uid)).fetchone()
+    if not txn:
+        conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
-    return jsonify({'success': True})
+    ticker   = txn['ticker']
+    txn_type = txn['type']
+    conn.execute('DELETE FROM transactions WHERE id=? AND user_id=?', (txn_id, uid))
+    conn.commit()
+    # If it was a sell, also remove the matching realized P&L record
+    if txn_type == 'sell':
+        conn.execute('''
+            DELETE FROM realized_pnl WHERE rowid = (
+                SELECT rowid FROM realized_pnl
+                WHERE user_id=? AND ticker=?
+                  AND ABS(shares - ?) < 0.0001
+                  AND ABS(sell_price - ?) < 0.01
+                ORDER BY id DESC LIMIT 1
+            )
+        ''', (uid, ticker, txn['shares'], txn['price']))
+        conn.commit()
+    # Recalculate position from remaining transactions
+    recalculate_position(conn, uid, ticker)
+    conn.close()
+    return jsonify({'success': True, 'recalculated': True})
 
 
 @app.route('/api/market-status')
@@ -622,6 +707,89 @@ def get_transactions():
         (uid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ─────────────────────────────────────────────────────────
+#  WATCHLIST ROUTES
+# ─────────────────────────────────────────────────────────
+
+@app.route('/api/watchlists')
+def get_watchlists():
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    wls  = conn.execute(
+        'SELECT * FROM watchlists WHERE user_id=? ORDER BY position', (uid,)).fetchall()
+    result = []
+    for wl in wls:
+        items = conn.execute(
+            'SELECT ticker FROM watchlist_items WHERE watchlist_id=? ORDER BY added',
+            (wl['id'],)).fetchall()
+        result.append({'id': wl['id'], 'name': wl['name'],
+                       'tickers': [i['ticker'] for i in items]})
+    conn.close()
+    return jsonify(result)
+
+
+@app.route('/api/watchlists/<int:wl_id>', methods=['PUT'])
+def rename_watchlist(wl_id):
+    uid  = LOCAL_USER_ID
+    name = (request.json.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name required.'}), 400
+    conn = get_db()
+    conn.execute('UPDATE watchlists SET name=? WHERE id=? AND user_id=?', (name, wl_id, uid))
+    conn.commit(); conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/watchlists/<int:wl_id>/items', methods=['POST'])
+def add_watchlist_item(wl_id):
+    uid    = LOCAL_USER_ID
+    ticker = (request.json.get('ticker') or '').strip().upper()
+    if not ticker:
+        return jsonify({'success': False, 'error': 'Ticker required.'}), 400
+    conn = get_db()
+    wl   = conn.execute('SELECT id FROM watchlists WHERE id=? AND user_id=?',
+                        (wl_id, uid)).fetchone()
+    if not wl:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Watchlist not found.'}), 404
+    try:
+        conn.execute('INSERT INTO watchlist_items (watchlist_id,ticker) VALUES (?,?)',
+                     (wl_id, ticker))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass   # already in list
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/watchlists/<int:wl_id>/items/<ticker>', methods=['DELETE'])
+def remove_watchlist_item(wl_id, ticker):
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    conn.execute('DELETE FROM watchlist_items WHERE watchlist_id=? AND ticker=?',
+                 (wl_id, ticker.upper()))
+    conn.commit(); conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/watchlists/<int:wl_id>/prices')
+def watchlist_prices(wl_id):
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT ticker FROM watchlist_items WHERE watchlist_id=?', (wl_id,)).fetchall()
+    conn.close()
+    tickers = [r['ticker'] for r in rows]
+    results = {}
+    threads = []
+    def _f(t): results[t] = fetch_stock_data(t)
+    for t in tickers:
+        th = threading.Thread(target=_f, args=(t,), daemon=True)
+        threads.append(th); th.start()
+    for th in threads: th.join(timeout=15)
+    return jsonify(results)
 
 
 # Always initialise DB (works under gunicorn too)

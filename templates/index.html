@@ -351,6 +351,30 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
 .pre-tag{background:rgba(255,193,7,.15);color:var(--warn);border:1px solid rgba(255,193,7,.3)}
 .post-tag{background:rgba(0,200,240,.1);color:var(--acc);border:1px solid rgba(0,200,240,.25)}
 .close-tag{background:rgba(123,146,184,.1);color:var(--txt2);border:1px solid rgba(123,146,184,.2)}
+
+/* ── Watchlist ── */
+.wl-panel{display:flex;flex-direction:column;height:100%}
+.wl-toolbar{display:flex;align-items:center;gap:8px;padding:8px 16px;
+  border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.wl-toolbar .wl-title{font-size:13px;font-weight:700;color:var(--txt);
+  cursor:pointer;padding:3px 6px;border-radius:4px;border:1px solid transparent}
+.wl-toolbar .wl-title:hover{border-color:var(--border2);background:var(--bg3)}
+.wl-toolbar .wl-title-input{font-size:13px;font-weight:700;background:var(--bg4);
+  border:1px solid var(--acc);border-radius:4px;color:var(--txt);padding:3px 6px;outline:none}
+.wl-tbl{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}
+.wl-tbl thead tr{position:sticky;top:0;z-index:100}
+.wl-tbl th{background:var(--bg3);color:var(--txt2);font-size:9.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.55px;padding:9px 10px;text-align:left;
+  border-bottom:2px solid var(--border);border-right:1px solid var(--border);
+  white-space:nowrap;overflow:hidden;user-select:none;position:relative;cursor:default}
+.wl-tbl th:last-child{border-right:none}
+.wl-tbl td{padding:6px 10px;border-bottom:1px solid var(--border);
+  border-right:1px solid rgba(26,40,68,.45);font-size:12px;
+  overflow:hidden;white-space:nowrap;vertical-align:middle}
+.wl-tbl td:last-child{border-right:none}
+.wl-tbl tbody tr:hover td{background:var(--bg3)}
+body.light .wl-tbl th{background:var(--bg3)}
+body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
 </style>
 </head>
 <body>
@@ -375,6 +399,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
       </div>
       <button class="btn btn-sell" id="sellMainBtn">− Sell</button>
       <button class="btn btn-acc" id="buyMainBtn">+ Buy</button>
+      <button class="btn btn-ghost" id="settingsBtn" title="Settings">⚙ Settings</button>
     </div>
   </div>
 
@@ -402,10 +427,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
 </header>
 
 <!-- ── Tabs ─────────────────────────────────────────────────── -->
-<nav class="tabs">
+<nav class="tabs" id="mainTabs">
   <button class="tab active" onclick="switchTab('portfolio',this)">Positions</button>
   <button class="tab" onclick="switchTab('realized',this)">Realized P&amp;L</button>
   <button class="tab" onclick="switchTab('transactions',this)">Transactions</button>
+  <!-- Watchlist tabs injected by JS -->
 </nav>
 
 <!-- ── Portfolio tab ─────────────────────────────────────────── -->
@@ -425,7 +451,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
     <table class="rtbl">
       <thead><tr>
         <th>Ticker</th><th>Date</th><th>Shares</th><th>Avg Buy</th>
-        <th>Sell Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th>
+        <th>Sell Price</th><th>Current Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th>
       </tr></thead>
       <tbody id="rtbody"></tbody>
     </table>
@@ -444,6 +470,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
     </table>
   </div>
 </div>
+
+<!-- ── Watchlist tab panels (1–5, injected content by JS) ────── -->
+<div class="tab-panel" id="tab-wl-1"><div class="wl-panel" id="wl-panel-1"></div></div>
+<div class="tab-panel" id="tab-wl-2"><div class="wl-panel" id="wl-panel-2"></div></div>
+<div class="tab-panel" id="tab-wl-3"><div class="wl-panel" id="wl-panel-3"></div></div>
+<div class="tab-panel" id="tab-wl-4"><div class="wl-panel" id="wl-panel-4"></div></div>
+<div class="tab-panel" id="tab-wl-5"><div class="wl-panel" id="wl-panel-5"></div></div>
 
 <!-- ── Alert popover (absolute, moved by JS) ─────────────────── -->
 <div class="alert-pop" id="alertPop">
@@ -630,6 +663,42 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
   </div>
 </div>
 
+<!-- ── Settings Modal ────────────────────────────────────────── -->
+<div class="overlay" id="settingsOverlay">
+  <div class="modal" style="width:380px">
+    <div class="modal-hdr">
+      <div class="modal-title"><div class="modal-dot" style="background:var(--txt2)"></div>Settings</div>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="fg">
+      <label>Auto-Refresh Interval</label>
+      <select id="set-refresh">
+        <option value="10">10 seconds</option>
+        <option value="30" selected>30 seconds</option>
+        <option value="60">1 minute</option>
+        <option value="120">2 minutes</option>
+        <option value="300">5 minutes</option>
+      </select>
+    </div>
+    <div class="fg">
+      <label>Default Commission ($)</label>
+      <input type="number" id="set-commission" min="0" step="0.01" placeholder="0.00"/>
+    </div>
+    <div class="fg">
+      <label>Price Decimals</label>
+      <select id="set-decimals">
+        <option value="2" selected>2 decimal places</option>
+        <option value="3">3 decimal places</option>
+        <option value="4">4 decimal places</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-acc"   onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Edit Transaction Modal ─────────────────────────────────── -->
 <div class="overlay" id="editTxnOverlay">
   <div class="modal">
@@ -735,20 +804,28 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sellMainBtn').addEventListener('click', e => {
     e.stopPropagation(); openSellModal(null);
   });
+  document.getElementById('settingsBtn').addEventListener('click', e => {
+    e.stopPropagation(); openSettings();
+  });
+  // Load settings values
+  loadSettings();
+  // Init watchlists
+  initWatchlists();
   document.getElementById('colsBtn').addEventListener('click', e => {
     e.stopPropagation();
     document.getElementById('colPanel').classList.toggle('show');
   });
 
   // Overlay backdrop clicks
-  ['buyOverlay','sellOverlay','editOverlay','editTxnOverlay','chartOverlay'].forEach(id => {
+  ['buyOverlay','sellOverlay','editOverlay','editTxnOverlay','settingsOverlay','chartOverlay'].forEach(id => {
     document.getElementById(id).addEventListener('click', e => {
       if (e.target.id === id) {
-        if (id === 'buyOverlay')     closeBuyModal();
-        if (id === 'sellOverlay')    closeSellModal();
-        if (id === 'editOverlay')    closeEditModal();
-        if (id === 'editTxnOverlay') closeEditTxn();
-        if (id === 'chartOverlay')   closeChart();
+        if (id === 'buyOverlay')      closeBuyModal();
+        if (id === 'sellOverlay')     closeSellModal();
+        if (id === 'editOverlay')     closeEditModal();
+        if (id === 'editTxnOverlay')  closeEditTxn();
+        if (id === 'settingsOverlay') closeSettings();
+        if (id === 'chartOverlay')    closeChart();
       }
     });
   });
@@ -762,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeEditModal(); closeEditTxn(); closeChart(); closeAlertPop(); }
+    if (e.key === 'Escape') { closeBuyModal(); closeSellModal(); closeEditModal(); closeEditTxn(); closeSettings(); closeChart(); closeAlertPop(); }
   });
 });
 
@@ -964,6 +1041,10 @@ function switchTab(name, btn) {
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='realized')     loadRealized();
   if (name==='transactions') loadTransactions();
+  if (name.startsWith('wl-')) {
+    const wlId = parseInt(name.replace('wl-',''));
+    loadWatchlist(wlId);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -989,6 +1070,7 @@ async function fetchSparklines() {
 
 function startRefresh() {
   if (refreshInterval) clearInterval(refreshInterval);
+  const ms = (appSettings.refresh || 30) * 1000;
   refreshInterval = setInterval(async () => {
     if (!portfolio.length) return;
     try {
@@ -999,7 +1081,7 @@ function startRefresh() {
       updateSummary();
       checkAlerts();
     } catch {}
-  }, 3000);
+  }, ms);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1191,9 +1273,9 @@ function renderCell(id, pos, p) {
 
     case 'actions':
       return `<div class="act-btns">
-        <button class="ab ab-buy"  onclick="event.stopPropagation();openBuyModal('${pos.ticker}')">+Buy</button>
-        <button class="ab ab-sell" onclick="event.stopPropagation();openSellModal('${pos.ticker}')">-Sell</button>
-        <button class="ab ab-edit" onclick="event.stopPropagation();openEditModal('${pos.ticker}')" title="Edit position">✎</button>
+        <button class="ab ab-buy"  onclick="event.stopPropagation();openBuyModal('${pos.ticker}')">+ Buy</button>
+        <button class="ab ab-sell" onclick="event.stopPropagation();openSellModal('${pos.ticker}')">− Sell</button>
+        <button class="ab ab-edit" onclick="event.stopPropagation();openEditModal('${pos.ticker}')" title="Edit position">✎ Edit</button>
         <button class="ab ab-del"  onclick="event.stopPropagation();confirmDelete('${pos.ticker}')" title="Remove">✕</button>
       </div>`;
 
@@ -1817,9 +1899,19 @@ async function loadRealized() {
   const rows = await fetchJSON('/api/realized-pnl');
   const tb   = document.getElementById('rtbody');
   if (!rows.length) {
-    tb.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
+    tb.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
     return;
   }
+  // Fetch current prices for sold tickers in background
+  const uniq   = [...new Set(rows.map(r=>r.ticker))];
+  const livePx = {};
+  await Promise.all(uniq.map(async t => {
+    try {
+      const d = prices[t] || await fetchJSON(`/api/stock/${t}`);
+      livePx[t] = d.display_price || d.price || null;
+    } catch { livePx[t] = null; }
+  }));
+
   // Totals row
   const totGross = rows.reduce((s,r)=>s+(r.profit_loss||0),0);
   const totNet   = rows.reduce((s,r)=>s+(r.net_profit_loss??r.profit_loss??0),0);
@@ -1833,12 +1925,15 @@ async function loadRealized() {
     const nc=net  >=0?'gain':'loss', ns=net  >=0?'+':'-';
     const buyP  = r.buy_price  != null ? '$'+(+r.buy_price ).toFixed(2) : '—';
     const sellP = r.sell_price != null ? '$'+(+r.sell_price).toFixed(2) : '—';
+    const curP  = livePx[r.ticker];
+    const curTxt = curP ? `$${curP.toFixed(2)}` : '<span class="dim">—</span>';
     return `<tr>
       <td><span class="ticker-chip" style="cursor:default">${r.ticker||'—'}</span></td>
       <td style="color:var(--txt2);font-size:11px">${r.trade_date||fmtDateTime(r.date)}</td>
       <td class="mono">${(+r.shares||0).toLocaleString(undefined,{maximumFractionDigits:4})}</td>
       <td class="mono">${buyP}</td>
       <td class="mono">${sellP}</td>
+      <td class="mono">${curTxt}</td>
       <td class="mono" style="color:var(--txt2)">$${(+(r.commission||0)).toFixed(2)}</td>
       <td class="mono ${gc}">${gs}${fmt$(Math.abs(gross))}</td>
       <td class="mono ${nc}">${ns}${fmt$(Math.abs(net))}</td>
@@ -1846,7 +1941,7 @@ async function loadRealized() {
     </tr>`;
   }).join('') +
   `<tr style="border-top:2px solid var(--border2);font-weight:700">
-    <td colspan="6" style="color:var(--txt2);font-size:11px;padding-top:10px">TOTAL</td>
+    <td colspan="7" style="color:var(--txt2);font-size:11px;padding-top:10px">Total</td>
     <td class="mono ${tgc}">${totGross>=0?'+':'-'}${fmt$(Math.abs(totGross))}</td>
     <td class="mono ${tnc}">${totNet  >=0?'+':'-'}${fmt$(Math.abs(totNet))}</td>
     <td></td>
@@ -1941,6 +2036,357 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme(next);
   });
 });
+
+/* ══════════════════════════════════════════════════════════
+   SETTINGS
+══════════════════════════════════════════════════════════ */
+let appSettings = { refresh: 30, commission: 0, decimals: 2 };
+
+function loadSettings() {
+  try { appSettings = { ...appSettings, ...JSON.parse(localStorage.getItem('ptSettings') || '{}') }; }
+  catch {}
+  document.getElementById('set-refresh').value    = appSettings.refresh;
+  document.getElementById('set-commission').value = appSettings.commission;
+  document.getElementById('set-decimals').value   = appSettings.decimals;
+}
+function saveSettings() {
+  appSettings.refresh    = parseInt(document.getElementById('set-refresh').value);
+  appSettings.commission = parseFloat(document.getElementById('set-commission').value) || 0;
+  appSettings.decimals   = parseInt(document.getElementById('set-decimals').value);
+  localStorage.setItem('ptSettings', JSON.stringify(appSettings));
+  // Apply new refresh interval
+  startRefresh();
+  // Pre-fill commission defaults in modals
+  ['buy-commission','sell-commission'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && (!el.value || +el.value === 0)) el.value = appSettings.commission || '';
+  });
+  toast('s', 'Settings Saved', 'Preferences updated.');
+  closeSettings();
+}
+function openSettings()  { document.getElementById('settingsOverlay').classList.add('show'); }
+function closeSettings() { document.getElementById('settingsOverlay').classList.remove('show'); }
+
+/* ══════════════════════════════════════════════════════════
+   WATCHLISTS
+══════════════════════════════════════════════════════════ */
+let watchlists     = [];   // [{id, name, tickers:[]}]
+let wlPrices       = {};   // {wl_id: {TICKER: priceData}}
+let wlRefreshTimer = null;
+let activeWlId     = null;
+
+const WL_COL_DEFS = [
+  {id:'wl-ticker',   label:'Ticker',       width:90,  hideable:false},
+  {id:'wl-name',     label:'Name',         width:170},
+  {id:'wl-price',    label:'Price',        width:100},
+  {id:'wl-pre',      label:'Pre-Market',   width:120},
+  {id:'wl-post',     label:'After-Hrs',    width:120},
+  {id:'wl-open',     label:'Open',         width:90},
+  {id:'wl-high',     label:'Day High',     width:90},
+  {id:'wl-low',      label:'Day Low',      width:90},
+  {id:'wl-close',    label:'Prev Close',   width:100},
+  {id:'wl-change',   label:'Day Change',   width:130},
+  {id:'wl-earnings', label:'Earnings',     width:110},
+  {id:'wl-dividend', label:'Dividend',     width:130},
+  {id:'wl-mktcap',   label:'Mkt Cap',      width:110},
+  {id:'wl-52h',      label:'52W High',     width:95},
+  {id:'wl-52l',      label:'52W Low',      width:95},
+  {id:'wl-actions',  label:'Actions',      width:70,  hideable:false},
+];
+let wlColWidths  = {};
+let wlColVisible = {};
+let wlColOrder   = WL_COL_DEFS.map(c=>c.id);
+
+function loadWlPrefs() {
+  try {
+    const s = JSON.parse(localStorage.getItem('ptWlPrefs') || '{}');
+    wlColWidths  = s.widths  || {};
+    wlColVisible = s.visible || {};
+    wlColOrder   = s.order   || WL_COL_DEFS.map(c=>c.id);
+    WL_COL_DEFS.forEach(c => { if (wlColVisible[c.id]==null) wlColVisible[c.id]=true; });
+  } catch {
+    wlColWidths={}; wlColVisible={};
+    WL_COL_DEFS.forEach(c=>wlColVisible[c.id]=true);
+    wlColOrder=WL_COL_DEFS.map(c=>c.id);
+  }
+}
+function saveWlPrefs() {
+  localStorage.setItem('ptWlPrefs', JSON.stringify({widths:wlColWidths,visible:wlColVisible,order:wlColOrder}));
+}
+
+async function initWatchlists() {
+  loadWlPrefs();
+  watchlists = await fetchJSON('/api/watchlists');
+  // Inject watchlist tabs
+  const nav = document.getElementById('mainTabs');
+  watchlists.forEach(wl => {
+    const btn = document.createElement('button');
+    btn.className  = 'tab';
+    btn.id         = `wl-tab-${wl.id}`;
+    btn.dataset.wlId = wl.id;
+    btn.textContent = wl.name;
+    btn.onclick    = () => switchTab(`wl-${wl.id}`, btn);
+    // Double-click to rename
+    btn.ondblclick = (e) => { e.preventDefault(); startRenameWl(wl.id, btn); };
+    nav.appendChild(btn);
+  });
+}
+
+function startRenameWl(wlId, btn) {
+  const wl    = watchlists.find(w=>w.id===wlId);
+  const input = document.createElement('input');
+  input.className  = 'wl-title-input';
+  input.value      = wl.name;
+  input.style.cssText = 'font-size:12px;width:110px;padding:3px 6px;font-weight:600;background:var(--bg4);border:1px solid var(--acc);border-radius:4px;color:var(--txt);outline:none';
+  btn.textContent = '';
+  btn.appendChild(input);
+  input.focus(); input.select();
+  const finish = async () => {
+    const name = input.value.trim() || wl.name;
+    await fetch(`/api/watchlists/${wlId}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    });
+    wl.name = name;
+    btn.textContent = name;
+    btn.ondblclick = (e) => { e.preventDefault(); startRenameWl(wlId, btn); };
+    // Update toolbar title if this watchlist is active
+    const titleEl = document.getElementById(`wl-title-${wlId}`);
+    if (titleEl) titleEl.textContent = name;
+  };
+  input.addEventListener('blur',  finish);
+  input.addEventListener('keydown', e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape'){input.value=wl.name;input.blur();} });
+}
+
+async function loadWatchlist(wlId) {
+  activeWlId = wlId;
+  const wl   = watchlists.find(w=>w.id===wlId);
+  if (!wl) return;
+  const panel = document.getElementById(`wl-panel-${wlId}`);
+  renderWlShell(wlId, wl, panel);
+  await refreshWlPrices(wlId);
+  // Auto-refresh while this tab is active
+  if (wlRefreshTimer) clearInterval(wlRefreshTimer);
+  wlRefreshTimer = setInterval(() => {
+    if (activeWlId === wlId) refreshWlPrices(wlId);
+    else { clearInterval(wlRefreshTimer); wlRefreshTimer=null; }
+  }, (appSettings.refresh||30) * 1000);
+}
+
+function renderWlShell(wlId, wl, panel) {
+  // Build the visible ordered columns
+  const cols = wlColOrder.filter(id => {
+    const def = WL_COL_DEFS.find(c=>c.id===id);
+    return def && (wlColVisible[id] !== false);
+  });
+  const colsHtml = cols.map(id => {
+    const def = WL_COL_DEFS.find(c=>c.id===id);
+    const w   = wlColWidths[id] || def.width;
+    return `<col id="wlcol-${id}" style="width:${w}px">`;
+  }).join('');
+  const headHtml = cols.map(id => {
+    const def = WL_COL_DEFS.find(c=>c.id===id);
+    const w   = wlColWidths[id] || def.width;
+    return `<th style="width:${w}px" draggable="true" data-col="${id}"
+      ondragstart="wlDragStart(event,'${id}')"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="wlDrop(event,'${id}')">
+      <div class="th-inner">${def.label}</div>
+      <div class="col-resize" data-col="${id}" onmousedown="wlResizeStart(event,'${id}')"></div>
+    </th>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="wl-toolbar">
+      <span id="wl-title-${wlId}" style="font-size:13px;font-weight:700;color:var(--txt);cursor:pointer;padding:3px 6px;border-radius:4px;border:1px solid transparent"
+        title="Double-click to rename" ondblclick="startRenameWl(${wlId},document.getElementById('wl-tab-${wlId}'))">${wl.name}</span>
+      <div style="flex:1"></div>
+      <div class="col-btn-wrap" style="position:relative">
+        <button class="btn btn-ghost" style="font-size:11px" onclick="toggleWlColPanel(${wlId})">⊞ Columns</button>
+        <div class="col-panel" id="wl-col-panel-${wlId}"></div>
+      </div>
+      <input id="wl-add-input-${wlId}" placeholder="Add ticker…" style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--txt);padding:5px 10px;font-size:12px;width:120px;outline:none;text-transform:uppercase"
+        onkeydown="if(event.key==='Enter')addWlTicker(${wlId})"/>
+      <button class="btn btn-acc" style="font-size:11px" onclick="addWlTicker(${wlId})">+ Add</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="wl-tbl" id="wl-tbl-${wlId}">
+        <colgroup id="wl-cg-${wlId}">${colsHtml}</colgroup>
+        <thead><tr>${headHtml}</tr></thead>
+        <tbody id="wl-body-${wlId}"><tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--txt2)">Loading prices…</td></tr></tbody>
+      </table>
+    </div>`;
+  buildWlColPanel(wlId);
+}
+
+async function refreshWlPrices(wlId) {
+  const wl = watchlists.find(w=>w.id===wlId);
+  if (!wl || !wl.tickers.length) {
+    const tb = document.getElementById(`wl-body-${wlId}`);
+    if (tb) tb.innerHTML=`<tr><td colspan="16" style="text-align:center;padding:40px;color:var(--txt2)">No tickers yet — add one above.</td></tr>`;
+    return;
+  }
+  const data = await fetchJSON(`/api/watchlists/${wlId}/prices`);
+  wlPrices[wlId] = data;
+  renderWlRows(wlId, wl, data);
+}
+
+function renderWlRows(wlId, wl, data) {
+  const tb   = document.getElementById(`wl-body-${wlId}`);
+  if (!tb) return;
+  const cols = wlColOrder.filter(id => {
+    const def = WL_COL_DEFS.find(c=>c.id===id);
+    return def && (wlColVisible[id] !== false);
+  });
+  tb.innerHTML = wl.tickers.map(ticker => {
+    const p = data[ticker] || {};
+    return `<tr>${cols.map(id => `<td>${renderWlCell(id,ticker,p)}</td>`).join('')}</tr>`;
+  }).join('');
+  if (!wl.tickers.length)
+    tb.innerHTML=`<tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--txt2)">No tickers yet.</td></tr>`;
+}
+
+function renderWlCell(id, ticker, p) {
+  const dp = p.display_price||p.price||0;
+  switch(id) {
+    case 'wl-ticker':
+      return `<span class="ticker-chip" style="cursor:default">${ticker}</span>`;
+    case 'wl-name':
+      return `<span style="color:var(--txt)">${p.name||ticker}</span>`;
+    case 'wl-price': {
+      if (!dp) return '<span class="dim">—</span>';
+      const tag = (p.market_status==='pre'||p.market_status==='post'||p.market_status==='closed')
+                ? '<span class="mkt-tag close-tag">Close</span>' : '';
+      return `<span class="mono">$${dp.toFixed(2)}</span>${tag}`;
+    }
+    case 'wl-pre':
+      if (!p.pre_price) return '<span class="dim">—</span>';
+      return `<span class="mono">$${p.pre_price.toFixed(2)}</span>
+              <span class="mkt-sub ${p.pre_chg_pct>=0?'gain':'loss'}">${p.pre_chg_pct>=0?'+':''}${(p.pre_chg_pct||0).toFixed(2)}%</span>`;
+    case 'wl-post':
+      if (!p.post_price) return '<span class="dim">—</span>';
+      return `<span class="mono">$${p.post_price.toFixed(2)}</span>
+              <span class="mkt-sub ${p.post_chg_pct>=0?'gain':'loss'}">${p.post_chg_pct>=0?'+':''}${(p.post_chg_pct||0).toFixed(2)}%</span>`;
+    case 'wl-open':
+      return p.open_price ? `<span class="mono">$${(+p.open_price).toFixed(2)}</span>` : '<span class="dim">—</span>';
+    case 'wl-high':
+      return p.day_high ? `<span class="mono gain">$${(+p.day_high).toFixed(2)}</span>` : '<span class="dim">—</span>';
+    case 'wl-low':
+      return p.day_low  ? `<span class="mono loss">$${(+p.day_low).toFixed(2)}</span>`  : '<span class="dim">—</span>';
+    case 'wl-close':
+      return p.prev_close ? `<span class="mono">$${(+p.prev_close).toFixed(2)}</span>` : '<span class="dim">—</span>';
+    case 'wl-change': {
+      const chg = p.effective_change??p.change, pct = p.effective_change_pct??p.change_pct;
+      if (chg==null) return '<span class="dim">—</span>';
+      const cls=chg>=0?'gain':'loss', s=chg>=0?'+':'';
+      return `<span class="${cls}"><span class="mono">${s}$${Math.abs(chg).toFixed(2)}</span>
+              <span class="pnl-sub">${s}${(pct||0).toFixed(2)}%</span></span>`;
+    }
+    case 'wl-earnings':
+      return p.earnings_date ? `<span style="color:var(--warn)">${fmtDate(p.earnings_date)}</span>` : '<span class="dim">—</span>';
+    case 'wl-dividend': {
+      const rate  = p.dividend_rate  || 0;
+      const yield_ = p.dividend_yield || 0;
+      const ex    = p.ex_div_date;
+      if (!rate) return '<span class="dim">—</span>';
+      return `<span class="mono">$${rate.toFixed(2)}</span>
+              <span class="pnl-sub">${yield_.toFixed(2)}%${ex?' · ex '+fmtDate(ex):''}</span>`;
+    }
+    case 'wl-mktcap': {
+      const mc = p.market_cap||0;
+      if (!mc) return '<span class="dim">—</span>';
+      const fmt = mc>=1e12?`$${(mc/1e12).toFixed(2)}T`:mc>=1e9?`$${(mc/1e9).toFixed(2)}B`:`$${(mc/1e6).toFixed(0)}M`;
+      return `<span class="mono">${fmt}</span>`;
+    }
+    case 'wl-52h':
+      return p.week_52_high ? `<span class="mono">$${(+p.week_52_high).toFixed(2)}</span>` : '<span class="dim">—</span>';
+    case 'wl-52l':
+      return p.week_52_low  ? `<span class="mono">$${(+p.week_52_low).toFixed(2)}</span>`  : '<span class="dim">—</span>';
+    case 'wl-actions':
+      return `<button class="ab ab-del" onclick="removeWlTicker(${wlPrices._activeWlId||activeWlId},'${ticker}')" title="Remove">✕</button>`;
+    default: return '—';
+  }
+}
+
+async function addWlTicker(wlId) {
+  const inp    = document.getElementById(`wl-add-input-${wlId}`);
+  const ticker = (inp.value||'').trim().toUpperCase();
+  if (!ticker) return;
+  const wl = watchlists.find(w=>w.id===wlId);
+  if (!wl) return;
+  const r = await fetch(`/api/watchlists/${wlId}/items`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ticker})
+  }).then(r=>r.json());
+  if (r.success) {
+    if (!wl.tickers.includes(ticker)) wl.tickers.push(ticker);
+    inp.value = '';
+    await refreshWlPrices(wlId);
+    toast('s','Added',`${ticker} added to watchlist.`);
+  }
+}
+
+async function removeWlTicker(wlId, ticker) {
+  if (!confirm(`Remove ${ticker} from this watchlist?`)) return;
+  await fetch(`/api/watchlists/${wlId}/items/${ticker}`,{method:'DELETE'});
+  const wl = watchlists.find(w=>w.id===wlId);
+  if (wl) wl.tickers = wl.tickers.filter(t=>t!==ticker);
+  await refreshWlPrices(wlId);
+  toast('i','Removed',`${ticker} removed from watchlist.`);
+}
+
+function buildWlColPanel(wlId) {
+  const panel = document.getElementById(`wl-col-panel-${wlId}`);
+  if (!panel) return;
+  panel.innerHTML = '<h4>Show / Hide Columns</h4>' +
+    WL_COL_DEFS.filter(c=>c.hideable!==false).map(c=>`
+      <label class="cv-row">
+        <input class="cv-chk" type="checkbox" ${wlColVisible[c.id]!==false?'checked':''}
+          onchange="wlToggleCol('${c.id}',this.checked,${wlId})"/>
+        ${c.label}
+      </label>`).join('');
+}
+
+function toggleWlColPanel(wlId) {
+  const panel = document.getElementById(`wl-col-panel-${wlId}`);
+  if (panel) panel.classList.toggle('show');
+  document.addEventListener('click', function handler(e) {
+    if (!e.target.closest('.col-btn-wrap')) { panel.classList.remove('show'); document.removeEventListener('click',handler); }
+  });
+}
+
+function wlToggleCol(colId, visible, wlId) {
+  wlColVisible[colId] = visible; saveWlPrefs();
+  renderWlShell(wlId, watchlists.find(w=>w.id===wlId), document.getElementById(`wl-panel-${wlId}`));
+  refreshWlPrices(wlId);
+}
+
+let _wlDragCol = null;
+function wlDragStart(e, colId) { _wlDragCol = colId; e.dataTransfer.effectAllowed='move'; }
+function wlDrop(e, targetId) {
+  e.preventDefault();
+  document.querySelectorAll('.wl-tbl th').forEach(th=>th.classList.remove('drag-over'));
+  if (!_wlDragCol || _wlDragCol===targetId) return;
+  const from=wlColOrder.indexOf(_wlDragCol), to=wlColOrder.indexOf(targetId);
+  if (from>=0&&to>=0){ wlColOrder.splice(to,0,wlColOrder.splice(from,1)[0]); saveWlPrefs(); }
+  const wl = watchlists.find(w=>w.id===activeWlId);
+  if (wl) { renderWlShell(activeWlId,wl,document.getElementById(`wl-panel-${activeWlId}`)); refreshWlPrices(activeWlId); }
+  _wlDragCol = null;
+}
+function wlResizeStart(e, colId) {
+  e.preventDefault(); e.stopPropagation();
+  const th=e.target.closest('th'), startX=e.clientX, startW=th.offsetWidth;
+  const onMove=ev=>{
+    const nw=Math.max(60,startW+ev.clientX-startX);
+    wlColWidths[colId]=nw;
+    const col=document.getElementById('wlcol-'+colId);
+    if(col) col.style.width=nw+'px';
+  };
+  const onUp=()=>{ saveWlPrefs(); document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); };
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
+}
 </script>
 </body>
 </html>
