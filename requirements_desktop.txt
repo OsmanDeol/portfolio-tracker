@@ -1,5 +1,0 @@
-flask>=3.0.0
-yfinance>=0.2.40
-flask-cors>=4.0.0
-pyinstaller>=6.0.0
-# No pywebview needed — uses Edge/Chrome --app mode (pre-installed on Windows 10/11)
