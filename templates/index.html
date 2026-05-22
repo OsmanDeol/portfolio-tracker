@@ -513,20 +513,24 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
       </div>
     </div>
 
+    <div id="buy-track-hint" style="display:none;background:rgba(0,200,240,.07);border:1px solid rgba(0,200,240,.2);border-radius:var(--r);padding:8px 12px;font-size:11px;color:var(--acc);margin-bottom:10px">
+      👁 <strong>Track-only mode</strong> — leave shares at 0 to add this stock to your portfolio for price monitoring without recording a purchase.
+    </div>
+
     <div class="fg-row">
       <div class="fg">
         <label>Date of Purchase</label>
         <input type="date" id="buy-date" onchange="onDateChange('buy')"/>
       </div>
       <div class="fg">
-        <label>Number of Shares</label>
-        <input type="number" id="buy-shares" placeholder="0" min="0.001" step="any" oninput="updateBuyCalc()"/>
+        <label>Number of Shares <span style="color:var(--txt3);font-weight:400">(0 = track only)</span></label>
+        <input type="number" id="buy-shares" placeholder="0" min="0" step="any" oninput="updateBuyCalc();toggleBuyTrackHint()"/>
       </div>
     </div>
-    <div class="fg-row">
+    <div class="fg-row" id="buy-price-row">
       <div class="fg">
         <label>Buy Price per Share ($)</label>
-        <input type="number" id="buy-price" placeholder="0.00" min="0.001" step="any" oninput="updateBuyCalc()"/>
+        <input type="number" id="buy-price" placeholder="0.00" min="0" step="any" oninput="updateBuyCalc()"/>
       </div>
       <div class="fg">
         <label>Commission / Fee ($)</label>
@@ -1240,9 +1244,11 @@ function renderCell(id, pos, p) {
     }
 
     case 'shares':
+      if (!pos.shares) return '<span class="mkt-tag" style="background:rgba(0,200,240,.1);color:var(--acc);border-color:rgba(0,200,240,.25)">Tracking</span>';
       return `<span class="mono">${pos.shares.toLocaleString(undefined,{maximumFractionDigits:4})}</span>`;
 
     case 'avg':
+      if (!pos.shares) return '<span class="dim">—</span>';
       return `<span class="mono">$${pos.avg_buy_price.toFixed(2)}</span>`;
 
     case 'invested':
@@ -1629,29 +1635,40 @@ function updateBuyCalc() {
   } else { el.classList.remove('show'); }
 }
 
+function toggleBuyTrackHint() {
+  const shares   = parseFloat(document.getElementById('buy-shares').value) || 0;
+  const hint     = document.getElementById('buy-track-hint');
+  const priceRow = document.getElementById('buy-price-row');
+  const isTrack  = shares === 0;
+  hint.style.display     = isTrack ? 'block' : 'none';
+  priceRow.style.opacity = isTrack ? '0.4'   : '1';
+}
+
 async function submitBuy(addAnother) {
-  const ticker = document.getElementById('buy-ticker').value.trim().toUpperCase();
-  const shares = parseFloat(document.getElementById('buy-shares').value);
-  const price  = parseFloat(document.getElementById('buy-price').value);
-  const comm   = parseFloat(document.getElementById('buy-commission').value)||0;
-  const date   = document.getElementById('buy-date').value;
-  const errEl  = document.getElementById('buy-err');
+  const ticker  = document.getElementById('buy-ticker').value.trim().toUpperCase();
+  const shares  = parseFloat(document.getElementById('buy-shares').value) || 0;
+  const price   = parseFloat(document.getElementById('buy-price').value)  || 0;
+  const comm    = parseFloat(document.getElementById('buy-commission').value)||0;
+  const date    = document.getElementById('buy-date').value;
+  const errEl   = document.getElementById('buy-err');
+  const isTrack = shares === 0;
 
   if (!ticker) { showErr(errEl,'Enter a ticker symbol.'); return; }
-  if (!shares||shares<=0) { showErr(errEl,'Enter number of shares.'); return; }
-  if (!price||price<=0)   { showErr(errEl,'Enter buy price.'); return; }
+  if (shares < 0)            { showErr(errEl,'Shares cannot be negative.'); return; }
+  if (!isTrack && price <= 0){ showErr(errEl,'Enter a buy price.'); return; }
   errEl.classList.remove('show');
 
   try {
     const r = await postJSON('/api/portfolio/buy',{ticker,shares,price,commission:comm,trade_date:date});
     if (r.success) {
-      toast('s','Position Added',`${shares} × ${ticker} @ $${price.toFixed(2)}`);
+      const msg = isTrack
+        ? `${ticker} added for price tracking`
+        : `${shares} × ${ticker} @ $${price.toFixed(2)}`;
+      toast('s', isTrack ? 'Now Tracking' : 'Position Added', msg);
       await loadPortfolio();
       if (addAnother) {
-        // Show success inline, clear fields, keep modal open
         const sm = document.getElementById('buy-success');
-        document.getElementById('buy-success-msg').textContent =
-          `✓ ${shares} ${ticker} @ $${price.toFixed(2)} saved`;
+        document.getElementById('buy-success-msg').textContent = `✓ ${msg}`;
         sm.classList.add('show');
         setTimeout(()=>sm.classList.remove('show'),3000);
         document.getElementById('buy-ticker').value     = '';
@@ -1661,6 +1678,8 @@ async function submitBuy(addAnother) {
         document.getElementById('buy-date').value       = new Date().toISOString().slice(0,10);
         document.getElementById('buy-calc').classList.remove('show');
         document.getElementById('buy-preview').classList.remove('show');
+        document.getElementById('buy-track-hint').style.display = 'none';
+        document.getElementById('buy-price-row').style.opacity  = '1';
         lookupCache['buy'] = null;
         document.getElementById('buy-ticker').focus();
       } else {

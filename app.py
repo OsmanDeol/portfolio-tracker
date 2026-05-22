@@ -260,7 +260,14 @@ def recalculate_position(conn, uid, ticker):
             shares     = max(0.0, shares - t['shares'])
             invested   = max(0.0, invested - cost_basis)
     if shares < 0.0001:
-        conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker))
+        # Only delete if there are actual transactions (don't remove track-only 0-share entries)
+        if txns:
+            conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker))
+        else:
+            # No transactions → leave the position as-is (track-only)
+            conn.execute(
+                'UPDATE positions SET shares=0,avg_buy_price=0,total_invested=0 WHERE user_id=? AND ticker=?',
+                (uid, ticker))
     else:
         avg_price = invested / shares
         conn.execute('''
@@ -488,18 +495,32 @@ def buy():
     uid        = LOCAL_USER_ID
     d          = request.json
     ticker     = d['ticker'].upper()
-    shares     = float(d['shares'])
-    price      = float(d['price'])
+    shares     = float(d.get('shares') or 0)
+    price      = float(d.get('price')  or 0)
     commission = float(d.get('commission', 0))
     trade_date = d.get('trade_date', '')
+
+    conn = get_db()
+
+    # ── Zero-share "track-only" entry ────────────────────────
+    if shares == 0:
+        try:
+            conn.execute(
+                'INSERT INTO positions (user_id,ticker,shares,avg_buy_price,total_invested) VALUES (?,?,0,0,0)',
+                (uid, ticker))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            pass   # already exists — nothing to do
+        conn.close()
+        return jsonify({'success': True, 'track_only': True})
+
+    # ── Normal buy ────────────────────────────────────────────
     total_cost = shares * price + commission
     eff_avg    = total_cost / shares
-
-    conn     = get_db()
-    existing = conn.execute(
+    existing   = conn.execute(
         'SELECT * FROM positions WHERE user_id=? AND ticker=?', (uid, ticker)).fetchone()
     if existing:
-        ns  = existing['shares']        + shares
+        ns  = existing['shares']         + shares
         ni  = existing['total_invested'] + total_cost
         nav = ni / ns
         conn.execute(
