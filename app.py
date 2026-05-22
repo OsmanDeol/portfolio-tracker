@@ -695,6 +695,48 @@ def delete_transaction(txn_id):
     return jsonify({'success': True, 'recalculated': True})
 
 
+@app.route('/api/portfolio/restore/<int:pnl_id>', methods=['POST'])
+def restore_position(pnl_id):
+    """
+    Restore a sold position by re-buying at the original average buy price.
+    Uses the realized_pnl record to reconstruct the position.
+    """
+    uid  = LOCAL_USER_ID
+    conn = get_db()
+    pnl  = conn.execute('SELECT * FROM realized_pnl WHERE id=? AND user_id=?',
+                        (pnl_id, uid)).fetchone()
+    if not pnl:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Record not found.'}), 404
+
+    ticker = pnl['ticker']
+    shares = pnl['shares']
+    price  = pnl['buy_price']
+    total  = shares * price
+
+    existing = conn.execute(
+        'SELECT * FROM positions WHERE user_id=? AND ticker=?', (uid, ticker)).fetchone()
+    if existing:
+        ns  = existing['shares']         + shares
+        ni  = existing['total_invested'] + total
+        nav = ni / ns
+        conn.execute(
+            'UPDATE positions SET shares=?,avg_buy_price=?,total_invested=? WHERE user_id=? AND ticker=?',
+            (ns, nav, ni, uid, ticker))
+    else:
+        conn.execute(
+            'INSERT INTO positions (user_id,ticker,shares,avg_buy_price,total_invested) VALUES (?,?,?,?,?)',
+            (uid, ticker, shares, price, total))
+
+    # Record as a buy transaction so the audit log is complete
+    conn.execute(
+        'INSERT INTO transactions (user_id,ticker,type,shares,price,commission,total,trade_date) VALUES (?,?,?,?,?,?,?,?)',
+        (uid, ticker, 'buy', shares, price, 0, total, pnl['trade_date']))
+
+    conn.commit(); conn.close()
+    return jsonify({'success': True, 'ticker': ticker, 'shares': shares, 'price': price})
+
+
 @app.route('/api/market-status')
 def api_market_status():
     sess = market_session()

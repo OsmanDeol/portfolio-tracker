@@ -451,7 +451,7 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
     <table class="rtbl">
       <thead><tr>
         <th>Ticker</th><th>Date</th><th>Shares</th><th>Avg Buy</th>
-        <th>Sell Price</th><th>Current Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th>
+        <th>Sell Price</th><th>Current Price</th><th>Commission</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>P&amp;L %</th><th>Actions</th>
       </tr></thead>
       <tbody id="rtbody"></tbody>
     </table>
@@ -1904,6 +1904,21 @@ async function submitEditTxn() {
   }
 }
 
+async function restorePosition(pnlId, ticker, shares, buyPrice) {
+  if (!confirm(
+    `Restore ${shares} shares of ${ticker} at $${buyPrice.toFixed(2)} avg buy price?\n\n` +
+    `This adds them back to your Positions tab as a new buy entry.`
+  )) return;
+  const r = await fetch(`/api/portfolio/restore/${pnlId}`, {method:'POST'}).then(r=>r.json());
+  if (r.success) {
+    toast('s', 'Position Restored', `${r.shares} × ${r.ticker} @ $${r.price.toFixed(2)} added back.`);
+    loadPortfolio();
+    loadRealized();
+  } else {
+    toast('e', 'Restore Failed', r.error||'Unknown error.');
+  }
+}
+
 async function deleteTxn(id) {
   if (!confirm('Delete this transaction record?\n\nThis only removes the log entry — your position will not change.')) return;
   const r = await fetch(`/api/transactions/${id}`, {method:'DELETE'}).then(r => r.json());
@@ -1918,7 +1933,7 @@ async function loadRealized() {
   const rows = await fetchJSON('/api/realized-pnl');
   const tb   = document.getElementById('rtbody');
   if (!rows.length) {
-    tb.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
+    tb.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--txt2)">No realized trades yet.</td></tr>`;
     return;
   }
   // Fetch current prices for sold tickers in background
@@ -1957,13 +1972,14 @@ async function loadRealized() {
       <td class="mono ${gc}">${gs}${fmt$(Math.abs(gross))}</td>
       <td class="mono ${nc}">${ns}${fmt$(Math.abs(net))}</td>
       <td class="mono ${nc}">${pct>=0?'+':''}${(+pct||0).toFixed(2)}%</td>
+      <td><button class="ab ab-buy" onclick="restorePosition(${r.id},'${r.ticker}',${+r.shares||0},${+r.buy_price||0})" title="Restore this position">↩ Restore</button></td>
     </tr>`;
   }).join('') +
   `<tr style="border-top:2px solid var(--border2);font-weight:700">
-    <td colspan="7" style="color:var(--txt2);font-size:11px;padding-top:10px">Total</td>
+    <td colspan="8" style="color:var(--txt2);font-size:11px;padding-top:10px">Total</td>
     <td class="mono ${tgc}">${totGross>=0?'+':'-'}${fmt$(Math.abs(totGross))}</td>
     <td class="mono ${tnc}">${totNet  >=0?'+':'-'}${fmt$(Math.abs(totNet))}</td>
-    <td></td>
+    <td></td><td></td>
   </tr>`;
 }
 
