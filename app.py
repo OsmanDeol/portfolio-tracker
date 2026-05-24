@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import json
 
-import anthropic
+import groq as groq_sdk
 import yfinance as yf
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
@@ -1032,37 +1032,46 @@ ROE: {fmtP(info.get('returnOnEquity'))}
 Beta: {fmtV(info.get('beta'))}
 Dividend Yield: {fmtP(info.get('dividendYield'))}"""
 
-        client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
-            model='claude-opus-4-5',
+        client = groq_sdk.Groq(api_key=api_key)
+        msg = client.chat.completions.create(
+            model='llama-3.1-70b-versatile',
             max_tokens=1200,
-            system=(
-                'You are a senior equity analyst with 20 years experience. '
-                'Analyze the stock data provided and give a clear, actionable recommendation. '
-                'Respond ONLY with a valid JSON object — no markdown, no prose outside the JSON.'
-            ),
-            messages=[{'role': 'user', 'content': (
-                f'{prompt_data}\n\n'
-                'Respond with this exact JSON:\n'
-                '{\n'
-                '  "recommendation": "BUY" | "HOLD" | "SELL",\n'
-                '  "confidence": <integer 1-10>,\n'
-                '  "summary": "<2-3 sentence executive summary>",\n'
-                '  "bull_case": ["<reason 1>", "<reason 2>", "<reason 3>"],\n'
-                '  "bear_case": ["<risk 1>", "<risk 2>", "<risk 3>"],\n'
-                '  "technicals": "<1-2 sentence technical read>",\n'
-                '  "fundamentals": "<1-2 sentence fundamental read>",\n'
-                '  "price_target_low": <number>,\n'
-                '  "price_target_high": <number>,\n'
-                '  "time_horizon": "Short-term (weeks)" | "Medium-term (3-6 months)" | "Long-term (1+ year)",\n'
-                '  "valuation": "Cheap" | "Fair" | "Expensive",\n'
-                '  "momentum": "Strong" | "Neutral" | "Weak",\n'
-                '  "quality": "High" | "Medium" | "Low"\n'
-                '}'
-            )}]
+            temperature=0.3,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are a senior equity analyst with 20 years experience. '
+                        'Analyze the stock data provided and give a clear, actionable recommendation. '
+                        'Respond ONLY with a valid JSON object — no markdown, no prose outside the JSON.'
+                    )
+                },
+                {
+                    'role': 'user',
+                    'content': (
+                        f'{prompt_data}\n\n'
+                        'Respond with this exact JSON:\n'
+                        '{\n'
+                        '  "recommendation": "BUY" | "HOLD" | "SELL",\n'
+                        '  "confidence": <integer 1-10>,\n'
+                        '  "summary": "<2-3 sentence executive summary>",\n'
+                        '  "bull_case": ["<reason 1>", "<reason 2>", "<reason 3>"],\n'
+                        '  "bear_case": ["<risk 1>", "<risk 2>", "<risk 3>"],\n'
+                        '  "technicals": "<1-2 sentence technical read>",\n'
+                        '  "fundamentals": "<1-2 sentence fundamental read>",\n'
+                        '  "price_target_low": <number>,\n'
+                        '  "price_target_high": <number>,\n'
+                        '  "time_horizon": "Short-term (weeks)" | "Medium-term (3-6 months)" | "Long-term (1+ year)",\n'
+                        '  "valuation": "Cheap" | "Fair" | "Expensive",\n'
+                        '  "momentum": "Strong" | "Neutral" | "Weak",\n'
+                        '  "quality": "High" | "Medium" | "Low"\n'
+                        '}'
+                    )
+                }
+            ]
         )
 
-        raw = msg.content[0].text.strip()
+        raw = msg.choices[0].message.content.strip()
         # Strip markdown code fences if model adds them
         if raw.startswith('```'):
             raw = raw.split('```')[1]
@@ -1072,9 +1081,9 @@ Dividend Yield: {fmtP(info.get('dividendYield'))}"""
 
     except json.JSONDecodeError as e:
         return jsonify({'success': False, 'error': f'AI response parse error: {e}'}), 500
-    except anthropic.AuthenticationError:
+    except groq_sdk.AuthenticationError:
         return jsonify({'success': False,
-                        'error': 'Invalid API key. Check your key in Settings.'}), 401
+                        'error': 'Invalid API key. Check your Groq key in Settings.'}), 401
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

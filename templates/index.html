@@ -581,7 +581,7 @@ body.light .ai-section{background:var(--bg3)}
     </div>
     <div id="aiNoKey" class="ai-no-key" style="display:none">
       ⚠️ Add your Anthropic API key in <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px" onclick="openSettings()">Settings</button> to use the AI Analyst.
-      <span style="color:var(--txt2);font-size:11px;display:block;margin-top:6px">Free key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--acc)">console.anthropic.com</a></span>
+      <span style="color:var(--txt2);font-size:11px;display:block;margin-top:6px">Free key at <a href="https://console.groq.com/keys" target="_blank" style="color:var(--acc)">console.groq.com</a></span>
     </div>
     <div id="aiLoading" class="ai-loading" style="display:none">
       <div class="ai-spinner"></div>
@@ -821,8 +821,8 @@ body.light .ai-section{background:var(--bg3)}
     <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:12px">
       <div style="font-size:11px;font-weight:700;color:var(--acc);letter-spacing:.5px;margin-bottom:8px">🧠 AI ANALYST</div>
       <div class="fg">
-        <label>Anthropic API Key <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--acc);font-size:10px;margin-left:6px">Get free key ↗</a></label>
-        <input type="password" id="set-api-key" placeholder="sk-ant-api03-..." autocomplete="off"/>
+        <label>Groq API Key (Free) <a href="https://console.groq.com/keys" target="_blank" style="color:var(--acc);font-size:10px;margin-left:6px">Get free key ↗</a></label>
+        <input type="password" id="set-api-key" placeholder="gsk_..." autocomplete="off"/>
       </div>
       <div style="font-size:10px;color:var(--txt2);margin-top:-4px">Stored locally. Never sent anywhere except Anthropic.</div>
     </div>
@@ -2366,7 +2366,7 @@ function _renderAiCard(ticker, price, a) {
       </div>
       <div class="ai-footer">
         <span>⚠️ Not financial advice. For informational purposes only.</span>
-        <span>Powered by Claude (Anthropic)</span>
+        <span>Powered by Llama 3.1 70B via Groq (free)</span>
       </div>
     </div>`;
   document.getElementById('aiResult').style.display = '';

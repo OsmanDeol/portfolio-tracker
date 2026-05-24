@@ -8,7 +8,7 @@ echo.
 
 REM ── Step 1: Dependencies ─────────────────────────────────
 echo [1/4] Installing dependencies...
-pip install flask yfinance flask-cors pyinstaller pillow anthropic
+pip install flask yfinance flask-cors pyinstaller pillow groq
 if errorlevel 1 ( echo ERROR: pip install failed & pause & exit /b 1 )
 
 REM ── Step 2: Icon ─────────────────────────────────────────
