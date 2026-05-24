@@ -6,6 +6,9 @@ import time
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import json
+
+import anthropic
 import yfinance as yf
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
@@ -895,6 +898,185 @@ def watchlist_prices(wl_id):
         threads.append(th); th.start()
     for th in threads: th.join(timeout=15)
     return jsonify(results)
+
+
+# ─────────────────────────────────────────────────────────
+#  AI ANALYST
+# ─────────────────────────────────────────────────────────
+
+def _safe(v, decimals=2):
+    try:
+        f = float(v)
+        return f if not (f != f) else None   # NaN → None
+    except Exception:
+        return None
+
+@app.route('/api/ai/analyze', methods=['POST'])
+def ai_analyze():
+    """AI-powered stock analysis using Claude."""
+    d      = request.json or {}
+    ticker  = (d.get('ticker') or '').strip().upper()
+    api_key = (d.get('api_key') or '').strip()
+    if not ticker:
+        return jsonify({'success': False, 'error': 'Ticker required.'}), 400
+    if not api_key:
+        return jsonify({'success': False, 'error':
+            'No API key. Add your Anthropic key in Settings.'}), 400
+
+    try:
+        stock = yf.Ticker(ticker)
+        info  = stock.info
+        if not info.get('regularMarketPrice') and not info.get('currentPrice') \
+                and not info.get('previousClose'):
+            return jsonify({'success': False,
+                            'error': f'Ticker "{ticker}" not found.'}), 404
+
+        hist = stock.history(period='1y')
+        if hist.empty:
+            return jsonify({'success': False, 'error': 'No price history available.'}), 404
+
+        closes  = hist['Close'].dropna()
+        volumes = hist['Volume'].dropna()
+        cur     = float(closes.iloc[-1])
+
+        def pct_chg(n):
+            if len(closes) <= n: return None
+            v = closes.pct_change(n).iloc[-1]
+            return None if v != v else round(float(v) * 100, 2)
+
+        # Moving averages
+        def sma(n):
+            if len(closes) < n: return None
+            v = closes.rolling(n).mean().iloc[-1]
+            return None if v != v else round(float(v), 2)
+
+        sma20, sma50, sma200 = sma(20), sma(50), sma(200)
+
+        # RSI
+        def rsi(period=14):
+            if len(closes) < period + 1: return None
+            d = closes.diff()
+            g = d.clip(lower=0).rolling(period).mean()
+            l = (-d.clip(upper=0)).rolling(period).mean()
+            rs = g / l
+            v = (100 - 100 / (1 + rs)).iloc[-1]
+            return None if v != v else round(float(v), 1)
+
+        rsi_val = rsi()
+
+        # MACD
+        ema12 = closes.ewm(span=12).mean()
+        ema26 = closes.ewm(span=26).mean()
+        macd  = ema12 - ema26
+        sig   = macd.ewm(span=9).mean()
+        macd_v = float(macd.iloc[-1]); sig_v = float(sig.iloc[-1])
+        macd_cross = 'bullish' if macd_v > sig_v else 'bearish'
+
+        # Volume
+        avg_vol = float(volumes.rolling(20).mean().iloc[-1]) if len(volumes) >= 20 else float(volumes.mean())
+        vol_ratio = round(float(volumes.iloc[-1]) / avg_vol, 2) if avg_vol else 1
+
+        w52h = _safe(info.get('fiftyTwoWeekHigh')) or cur
+        w52l = _safe(info.get('fiftyTwoWeekLow'))  or cur
+
+        def fmtM(v):
+            v = _safe(v)
+            if v is None: return 'N/A'
+            if v >= 1e12: return f'${v/1e12:.2f}T'
+            if v >= 1e9:  return f'${v/1e9:.2f}B'
+            if v >= 1e6:  return f'${v/1e6:.0f}M'
+            return f'${v:.0f}'
+
+        def fmtP(v):
+            v = _safe(v)
+            return f'{v*100:.1f}%' if v is not None else 'N/A'
+
+        def fmtV(v, d=2):
+            v = _safe(v)
+            return f'{v:.{d}f}' if v is not None else 'N/A'
+
+        position_52w = round((cur - w52l) / (w52h - w52l) * 100, 1) if w52h != w52l else 50
+
+        prompt_data = f"""STOCK: {ticker} — {info.get('longName', ticker)}
+Sector: {info.get('sector','N/A')} | Industry: {info.get('industry','N/A')}
+
+PRICE & PERFORMANCE
+Current Price: ${cur:.2f}
+1-Day: {fmtV(pct_chg(1))}%  | 1-Week: {fmtV(pct_chg(5))}%
+1-Month: {fmtV(pct_chg(21))}%  | 3-Month: {fmtV(pct_chg(63))}%
+YTD: {fmtV(pct_chg(len(closes)-1))}%
+52W High: ${w52h:.2f} ({((cur/w52h-1)*100):.1f}% from high)
+52W Low:  ${w52l:.2f} ({((cur/w52l-1)*100):.1f}% from low)
+52W Position: {position_52w:.0f}% (0=low, 100=high)
+
+TECHNICALS
+SMA-20:  ${sma20 or 'N/A'} — price is {'above' if sma20 and cur>sma20 else 'below'}
+SMA-50:  ${sma50 or 'N/A'} — price is {'above' if sma50 and cur>sma50 else 'below'}
+SMA-200: ${sma200 or 'N/A'} — price is {'above' if sma200 and cur>sma200 else 'below'}
+RSI(14): {rsi_val or 'N/A'} {'(Overbought)' if rsi_val and rsi_val>70 else '(Oversold)' if rsi_val and rsi_val<30 else '(Neutral)'}
+MACD: {macd_cross} crossover  (MACD={macd_v:.3f}, Signal={sig_v:.3f})
+Volume vs 20d avg: {vol_ratio}x
+
+FUNDAMENTALS
+Market Cap: {fmtM(info.get('marketCap'))}
+P/E (TTM): {fmtV(info.get('trailingPE'))}
+P/E (Fwd): {fmtV(info.get('forwardPE'))}
+PEG: {fmtV(info.get('pegRatio'))}
+EPS (TTM): ${fmtV(info.get('trailingEps'))}
+Revenue Growth YoY: {fmtP(info.get('revenueGrowth'))}
+Earnings Growth YoY: {fmtP(info.get('earningsGrowth'))}
+Profit Margin: {fmtP(info.get('profitMargins'))}
+Gross Margin: {fmtP(info.get('grossMargins'))}
+Debt/Equity: {fmtV(info.get('debtToEquity'))}
+ROE: {fmtP(info.get('returnOnEquity'))}
+Beta: {fmtV(info.get('beta'))}
+Dividend Yield: {fmtP(info.get('dividendYield'))}"""
+
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=1200,
+            system=(
+                'You are a senior equity analyst with 20 years experience. '
+                'Analyze the stock data provided and give a clear, actionable recommendation. '
+                'Respond ONLY with a valid JSON object — no markdown, no prose outside the JSON.'
+            ),
+            messages=[{'role': 'user', 'content': (
+                f'{prompt_data}\n\n'
+                'Respond with this exact JSON:\n'
+                '{\n'
+                '  "recommendation": "BUY" | "HOLD" | "SELL",\n'
+                '  "confidence": <integer 1-10>,\n'
+                '  "summary": "<2-3 sentence executive summary>",\n'
+                '  "bull_case": ["<reason 1>", "<reason 2>", "<reason 3>"],\n'
+                '  "bear_case": ["<risk 1>", "<risk 2>", "<risk 3>"],\n'
+                '  "technicals": "<1-2 sentence technical read>",\n'
+                '  "fundamentals": "<1-2 sentence fundamental read>",\n'
+                '  "price_target_low": <number>,\n'
+                '  "price_target_high": <number>,\n'
+                '  "time_horizon": "Short-term (weeks)" | "Medium-term (3-6 months)" | "Long-term (1+ year)",\n'
+                '  "valuation": "Cheap" | "Fair" | "Expensive",\n'
+                '  "momentum": "Strong" | "Neutral" | "Weak",\n'
+                '  "quality": "High" | "Medium" | "Low"\n'
+                '}'
+            )}]
+        )
+
+        raw = msg.content[0].text.strip()
+        # Strip markdown code fences if model adds them
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'): raw = raw[4:]
+        analysis = json.loads(raw)
+        return jsonify({'success': True, 'ticker': ticker, 'price': cur, 'analysis': analysis})
+
+    except json.JSONDecodeError as e:
+        return jsonify({'success': False, 'error': f'AI response parse error: {e}'}), 500
+    except anthropic.AuthenticationError:
+        return jsonify({'success': False,
+                        'error': 'Invalid API key. Check your key in Settings.'}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # Always initialise DB (works under gunicorn too)

@@ -375,6 +375,83 @@ body{font-family:var(--sans);background:var(--bg);color:var(--txt);display:flex;
 .wl-tbl tbody tr:hover td{background:var(--bg3)}
 body.light .wl-tbl th{background:var(--bg3)}
 body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
+
+/* ── AI Analyst Tab ── */
+.ai-wrap{padding:20px;max-width:900px;margin:0 auto;overflow-y:auto;height:100%}
+.ai-search-row{display:flex;gap:10px;margin-bottom:16px}
+.ai-search-input{flex:1;padding:10px 14px;border-radius:var(--r);border:1px solid var(--border2);
+  background:var(--bg3);color:var(--txt);font-size:14px;font-family:var(--sans)}
+.ai-search-input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-dim)}
+.ai-no-key{background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.25);border-radius:var(--r);
+  padding:12px 16px;font-size:12px;color:var(--warn);margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ai-loading{display:flex;align-items:center;gap:14px;padding:40px;color:var(--txt2);font-size:14px;justify-content:center}
+.ai-spinner{width:28px;height:28px;border:3px solid var(--border2);border-top-color:var(--acc);
+  border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Result card */
+.ai-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:16px}
+.ai-card-hero{padding:20px 24px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--border)}
+.ai-rec-badge{font-size:22px;font-weight:800;padding:10px 24px;border-radius:var(--r);letter-spacing:1px;flex-shrink:0}
+.ai-rec-BUY{background:rgba(0,230,118,.15);color:var(--gain);border:2px solid rgba(0,230,118,.35)}
+.ai-rec-HOLD{background:rgba(255,193,7,.12);color:var(--warn);border:2px solid rgba(255,193,7,.3)}
+.ai-rec-SELL{background:rgba(255,79,79,.12);color:var(--loss);border:2px solid rgba(255,79,79,.3)}
+.ai-hero-meta{flex:1}
+.ai-hero-ticker{font-size:20px;font-weight:700;font-family:var(--mono)}
+.ai-hero-price{font-size:13px;color:var(--txt2);margin-top:2px}
+.ai-hero-summary{font-size:13px;color:var(--txt);margin-top:8px;line-height:1.5}
+.ai-conf-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.ai-conf-label{font-size:11px;color:var(--txt2)}
+.ai-conf-dots{display:flex;gap:3px}
+.ai-dot{width:14px;height:14px;border-radius:50%;background:var(--bg4)}
+.ai-dot.on-buy{background:var(--gain)}
+.ai-dot.on-hold{background:var(--warn)}
+.ai-dot.on-sell{background:var(--loss)}
+
+.ai-body{padding:18px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ai-section{background:var(--bg3);border-radius:var(--r);padding:14px}
+.ai-section.full{grid-column:1/-1}
+.ai-section-title{font-size:10px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
+.ai-bull-bear{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ai-bull{background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.15);border-radius:var(--r);padding:14px}
+.ai-bear{background:rgba(255,79,79,.06);border:1px solid rgba(255,79,79,.15);border-radius:var(--r);padding:14px}
+.ai-bull .ai-section-title{color:var(--gain)}
+.ai-bear .ai-section-title{color:var(--loss)}
+.ai-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.ai-list li{font-size:12px;color:var(--txt);padding-left:16px;position:relative;line-height:1.4}
+.ai-list li::before{content:'•';position:absolute;left:0;color:var(--txt2)}
+.ai-bull .ai-list li::before{content:'↑';color:var(--gain)}
+.ai-bear .ai-list li::before{content:'↓';color:var(--loss)}
+
+.ai-target-row{display:flex;align-items:center;gap:10px;margin-top:6px}
+.ai-target-low{font-size:13px;font-weight:700;color:var(--txt2)}
+.ai-target-high{font-size:13px;font-weight:700;color:var(--acc)}
+.ai-target-bar{flex:1;height:6px;background:var(--bg4);border-radius:3px;position:relative;overflow:visible}
+.ai-target-cur{position:absolute;top:-4px;width:2px;height:14px;background:var(--warn);border-radius:1px;transform:translateX(-50%)}
+
+.ai-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.ai-chip{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:600;white-space:nowrap}
+.chip-green{background:rgba(0,230,118,.12);color:var(--gain);border:1px solid rgba(0,230,118,.25)}
+.chip-yellow{background:rgba(255,193,7,.12);color:var(--warn);border:1px solid rgba(255,193,7,.25)}
+.chip-red{background:rgba(255,79,79,.1);color:var(--loss);border:1px solid rgba(255,79,79,.2)}
+.chip-blue{background:var(--acc-dim);color:var(--acc);border:1px solid rgba(0,200,240,.25)}
+.chip-grey{background:var(--bg4);color:var(--txt2);border:1px solid var(--border)}
+
+.ai-footer{padding:10px 24px;border-top:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--txt3)}
+
+.ai-history-title{font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;
+  letter-spacing:.7px;margin:4px 0 8px}
+.ai-hist-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;
+  border:1px solid var(--border2);background:var(--bg3);cursor:pointer;font-size:11px;
+  color:var(--txt2);margin:0 4px 4px 0;transition:all .15s}
+.ai-hist-chip:hover{border-color:var(--acc);color:var(--acc)}
+.ai-hist-buy{border-color:rgba(0,230,118,.35);color:var(--gain)}
+.ai-hist-hold{border-color:rgba(255,193,7,.35);color:var(--warn)}
+.ai-hist-sell{border-color:rgba(255,79,79,.35);color:var(--loss)}
+body.light .ai-search-input{background:var(--bg4)}
+body.light .ai-card{background:var(--bg2)}
+body.light .ai-section{background:var(--bg3)}
 </style>
 </head>
 <body>
@@ -431,6 +508,7 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
   <button class="tab active" onclick="switchTab('portfolio',this)">Positions</button>
   <button class="tab" onclick="switchTab('realized',this)">Realized P&amp;L</button>
   <button class="tab" onclick="switchTab('transactions',this)">Transactions</button>
+  <button class="tab" onclick="switchTab('ai',this)" style="color:var(--acc)">🧠 AI Analyst</button>
   <!-- Watchlist tabs injected by JS -->
 </nav>
 
@@ -489,6 +567,29 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
     <button class="btn btn-ghost" id="trashToggleBtn" style="font-size:11px;gap:5px" onclick="toggleTrash()">
       🗑 Show Recently Deleted
     </button>
+  </div>
+</div>
+
+<!-- ── AI Analyst tab ─────────────────────────────────────────── -->
+<div class="tab-panel" id="tab-ai">
+  <div class="ai-wrap">
+    <!-- Search bar -->
+    <div class="ai-search-row">
+      <input class="ai-search-input" id="aiTickerInput" type="text" placeholder="Enter ticker (e.g. AAPL, TSLA, NVDA)…" maxlength="12"
+        onkeydown="if(event.key==='Enter')runAiAnalysis()"/>
+      <button class="btn btn-acc" id="aiAnalyseBtn" onclick="runAiAnalysis()">🧠 Analyse</button>
+    </div>
+    <div id="aiNoKey" class="ai-no-key" style="display:none">
+      ⚠️ Add your Anthropic API key in <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px" onclick="openSettings()">Settings</button> to use the AI Analyst.
+      <span style="color:var(--txt2);font-size:11px;display:block;margin-top:6px">Free key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--acc)">console.anthropic.com</a></span>
+    </div>
+    <div id="aiLoading" class="ai-loading" style="display:none">
+      <div class="ai-spinner"></div>
+      <div>Claude is analysing <span id="aiLoadTicker"></span>…</div>
+    </div>
+    <div id="aiResult" style="display:none"></div>
+    <!-- Recent analyses -->
+    <div id="aiHistory" class="ai-history"></div>
   </div>
 </div>
 
@@ -716,6 +817,14 @@ body.light .wl-tbl td{border-right-color:rgba(168,188,218,.45)}
         <option value="3">3 decimal places</option>
         <option value="4">4 decimal places</option>
       </select>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:12px 0 10px;padding-top:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--acc);letter-spacing:.5px;margin-bottom:8px">🧠 AI ANALYST</div>
+      <div class="fg">
+        <label>Anthropic API Key <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--acc);font-size:10px;margin-left:6px">Get free key ↗</a></label>
+        <input type="password" id="set-api-key" placeholder="sk-ant-api03-..." autocomplete="off"/>
+      </div>
+      <div style="font-size:10px;color:var(--txt2);margin-top:-4px">Stored locally. Never sent anywhere except Anthropic.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
@@ -1066,6 +1175,11 @@ function switchTab(name, btn) {
   document.getElementById('tab-'+name).classList.add('active');
   if (name==='realized')     loadRealized();
   if (name==='transactions') loadTransactions();
+  if (name==='ai') {
+    renderAiHistory();
+    if (!appSettings.apiKey) document.getElementById('aiNoKey').style.display = '';
+    else document.getElementById('aiNoKey').style.display = 'none';
+  }
   if (name.startsWith('wl-')) {
     const wlId = parseInt(name.replace('wl-',''));
     loadWatchlist(wlId);
@@ -2095,6 +2209,170 @@ async function loadTransactions() {
 }
 
 /* ══════════════════════════════════════════════════════════
+   AI ANALYST
+══════════════════════════════════════════════════════════ */
+let aiHistory = JSON.parse(localStorage.getItem('ptAiHistory') || '[]'); // [{ticker,rec,ts,analysis,price}]
+
+function renderAiHistory() {
+  const el = document.getElementById('aiHistory');
+  if (!el) return;
+  if (!aiHistory.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="ai-history-title">Recent Analyses</div>` +
+    aiHistory.slice(0, 8).map(h => {
+      const cls = `ai-hist-${h.rec.toLowerCase()}`;
+      return `<span class="ai-hist-chip ${cls}" onclick="showAiResult(${JSON.stringify(JSON.stringify(h)).slice(1,-1)})">
+        ${h.ticker} <span style="font-size:10px">${h.rec}</span>
+      </span>`;
+    }).join('');
+}
+
+function showAiResult(jsonStr) {
+  const h = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+  _renderAiCard(h.ticker, h.price, h.analysis);
+}
+
+async function runAiAnalysis() {
+  const ticker = (document.getElementById('aiTickerInput').value || '').trim().toUpperCase();
+  if (!ticker) { toast('w','Enter Ticker','Type a ticker symbol first.'); return; }
+
+  const apiKey = appSettings.apiKey;
+  if (!apiKey) {
+    document.getElementById('aiNoKey').style.display = '';
+    document.getElementById('aiResult').style.display = 'none';
+    return;
+  }
+  document.getElementById('aiNoKey').style.display = 'none';
+
+  const btn = document.getElementById('aiAnalyseBtn');
+  btn.disabled = true; btn.textContent = '⏳ Analysing…';
+  document.getElementById('aiLoading').style.display = '';
+  document.getElementById('aiLoadTicker').textContent = ticker;
+  document.getElementById('aiResult').style.display = 'none';
+
+  try {
+    const r = await fetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ticker, api_key: apiKey })
+    }).then(r => r.json());
+
+    document.getElementById('aiLoading').style.display = 'none';
+    if (!r.success) { toast('e','Analysis Failed', r.error||'Unknown error.'); return; }
+
+    _renderAiCard(r.ticker, r.price, r.analysis);
+
+    // Save to history
+    aiHistory = aiHistory.filter(h => h.ticker !== r.ticker);
+    aiHistory.unshift({ ticker: r.ticker, price: r.price, rec: r.analysis.recommendation,
+                        analysis: r.analysis, ts: Date.now() });
+    aiHistory = aiHistory.slice(0, 20);
+    localStorage.setItem('ptAiHistory', JSON.stringify(aiHistory));
+    renderAiHistory();
+  } catch(e) {
+    document.getElementById('aiLoading').style.display = 'none';
+    toast('e','Error', e.message||'Request failed.');
+  } finally {
+    btn.disabled = false; btn.textContent = '🧠 Analyse';
+  }
+}
+
+function _renderAiCard(ticker, price, a) {
+  const rec   = a.recommendation || 'HOLD';
+  const conf  = Math.min(10, Math.max(1, parseInt(a.confidence) || 5));
+  const dotCls= `on-${rec.toLowerCase()}`;
+
+  const dots  = Array.from({length:10},(_,i) =>
+    `<div class="ai-dot${i<conf?' '+dotCls:''}"></div>`).join('');
+
+  const chipColor = v => {
+    if (!v) return 'chip-grey';
+    v = v.toLowerCase();
+    if (['cheap','strong','high'].some(k=>v.includes(k)))  return 'chip-green';
+    if (['fair','neutral','medium'].some(k=>v.includes(k))) return 'chip-yellow';
+    if (['expensive','weak','low'].some(k=>v.includes(k)))  return 'chip-red';
+    return 'chip-blue';
+  };
+
+  // Price target bar
+  const lo = a.price_target_low  || price * 0.9;
+  const hi = a.price_target_high || price * 1.1;
+  const curPct = Math.max(0, Math.min(100, ((price - lo) / (hi - lo || 1)) * 100));
+
+  const bull = (a.bull_case || []).map(b=>`<li>${b}</li>`).join('');
+  const bear = (a.bear_case || []).map(b=>`<li>${b}</li>`).join('');
+
+  const horizon = a.time_horizon || '—';
+  const timeChipCls = horizon.toLowerCase().includes('short') ? 'chip-yellow' :
+                      horizon.toLowerCase().includes('long')  ? 'chip-green' : 'chip-blue';
+
+  document.getElementById('aiResult').innerHTML = `
+    <div class="ai-card">
+      <div class="ai-card-hero">
+        <div class="ai-rec-badge ai-rec-${rec}">${rec}</div>
+        <div class="ai-hero-meta">
+          <div class="ai-hero-ticker">${ticker} <span style="font-size:13px;color:var(--txt2);font-family:var(--sans)">@ $${price.toFixed(2)}</span></div>
+          <div class="ai-conf-row">
+            <span class="ai-conf-label">Confidence</span>
+            <div class="ai-conf-dots">${dots}</div>
+            <span class="ai-conf-label">${conf}/10</span>
+          </div>
+          <div class="ai-hero-summary">${a.summary || ''}</div>
+        </div>
+      </div>
+      <div class="ai-body">
+        <!-- Bull / Bear -->
+        <div class="ai-bull-bear">
+          <div class="ai-bull">
+            <div class="ai-section-title">↑ Bull Case</div>
+            <ul class="ai-list">${bull}</ul>
+          </div>
+          <div class="ai-bear">
+            <div class="ai-section-title">↓ Bear Case / Risks</div>
+            <ul class="ai-list">${bear}</ul>
+          </div>
+        </div>
+        <!-- Technicals -->
+        <div class="ai-section">
+          <div class="ai-section-title">📈 Technicals</div>
+          <div style="font-size:12px;color:var(--txt);line-height:1.5">${a.technicals||'—'}</div>
+        </div>
+        <!-- Fundamentals -->
+        <div class="ai-section">
+          <div class="ai-section-title">📊 Fundamentals</div>
+          <div style="font-size:12px;color:var(--txt);line-height:1.5">${a.fundamentals||'—'}</div>
+        </div>
+        <!-- Price Target -->
+        <div class="ai-section">
+          <div class="ai-section-title">🎯 Price Target</div>
+          <div class="ai-target-row">
+            <span class="ai-target-low">$${(+lo).toFixed(2)}</span>
+            <div class="ai-target-bar">
+              <div class="ai-target-cur" style="left:${curPct}%" title="Current: $${price.toFixed(2)}"></div>
+            </div>
+            <span class="ai-target-high">$${(+hi).toFixed(2)}</span>
+          </div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:6px">Current $${price.toFixed(2)} · Low $${(+lo).toFixed(2)} · High $${(+hi).toFixed(2)}</div>
+        </div>
+        <!-- Signals -->
+        <div class="ai-section">
+          <div class="ai-section-title">🏷 Signals</div>
+          <div class="ai-chips">
+            <span class="ai-chip ${chipColor(a.valuation)}">Valuation: ${a.valuation||'—'}</span>
+            <span class="ai-chip ${chipColor(a.momentum)}">Momentum: ${a.momentum||'—'}</span>
+            <span class="ai-chip ${chipColor(a.quality)}">Quality: ${a.quality||'—'}</span>
+            <span class="ai-chip ${timeChipCls}">${horizon}</span>
+          </div>
+        </div>
+      </div>
+      <div class="ai-footer">
+        <span>⚠️ Not financial advice. For informational purposes only.</span>
+        <span>Powered by Claude (Anthropic)</span>
+      </div>
+    </div>`;
+  document.getElementById('aiResult').style.display = '';
+}
+
+/* ══════════════════════════════════════════════════════════
    TOAST
 ══════════════════════════════════════════════════════════ */
 function toast(type,title,msg) {
@@ -2156,7 +2434,7 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ══════════════════════════════════════════════════════════
    SETTINGS
 ══════════════════════════════════════════════════════════ */
-let appSettings = { refresh: 30, commission: 0, decimals: 2 };
+let appSettings = { refresh: 30, commission: 0, decimals: 2, apiKey: '' };
 
 function loadSettings() {
   try { appSettings = { ...appSettings, ...JSON.parse(localStorage.getItem('ptSettings') || '{}') }; }
@@ -2164,11 +2442,13 @@ function loadSettings() {
   document.getElementById('set-refresh').value    = appSettings.refresh;
   document.getElementById('set-commission').value = appSettings.commission;
   document.getElementById('set-decimals').value   = appSettings.decimals;
+  document.getElementById('set-api-key').value    = appSettings.apiKey || '';
 }
 function saveSettings() {
   appSettings.refresh    = parseInt(document.getElementById('set-refresh').value);
   appSettings.commission = parseFloat(document.getElementById('set-commission').value) || 0;
   appSettings.decimals   = parseInt(document.getElementById('set-decimals').value);
+  appSettings.apiKey     = document.getElementById('set-api-key').value.trim();
   localStorage.setItem('ptSettings', JSON.stringify(appSettings));
   // Apply new refresh interval
   startRefresh();
