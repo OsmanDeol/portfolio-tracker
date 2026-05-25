@@ -10,8 +10,11 @@ import json
 
 import groq as groq_sdk
 import yfinance as yf
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 from flask_cors import CORS
+from flask_login import (LoginManager, UserMixin,
+                         login_user, logout_user, current_user)
+from authlib.integrations.flask_client import OAuth
 
 # Support PyInstaller frozen builds — find templates next to the exe
 if getattr(sys, 'frozen', False):
@@ -21,17 +24,63 @@ else:
     app   = Flask(__name__)
 
 CORS(app)
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-only-change-in-prod-please')
 
-# ── Single local user — no login needed ──────────────────
-LOCAL_USER_ID  = 1
+# ── GitHub OAuth (only active when env vars are set) ─────
+_GH_CLIENT_ID     = os.environ.get('GITHUB_CLIENT_ID', '')
+_GH_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '')
+_ALLOWED_USERS    = {u.strip().lower()
+                     for u in os.environ.get('ALLOWED_GITHUB_USERS', '').split(',')
+                     if u.strip()}
+AUTH_ENABLED      = bool(_GH_CLIENT_ID and _GH_CLIENT_SECRET)
 
-DB_PATH        = os.environ.get('DB_PATH', 'portfolio.db')
-price_cache    = {}
-sparkline_cache= {}
-cache_lock     = threading.Lock()
-PRICE_TTL      = 3
-SPARKLINE_TTL  = 300
-ET             = ZoneInfo('America/New_York')
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+_oauth = OAuth(app)
+if AUTH_ENABLED:
+    _gh = _oauth.register(
+        name='github',
+        client_id=_GH_CLIENT_ID,
+        client_secret=_GH_CLIENT_SECRET,
+        access_token_url='https://github.com/login/oauth/access_token',
+        authorize_url='https://github.com/login/oauth/authorize',
+        api_base_url='https://api.github.com/',
+        client_kwargs={'scope': 'read:user'},
+    )
+
+DB_PATH         = os.environ.get('DB_PATH', 'portfolio.db')
+price_cache     = {}
+sparkline_cache = {}
+cache_lock      = threading.Lock()
+PRICE_TTL       = 60    # shared server cache: one yfinance call/min per ticker
+SPARKLINE_TTL   = 300
+ET              = ZoneInfo('America/New_York')
+
+
+# ── User model ───────────────────────────────────────────
+class User(UserMixin):
+    def __init__(self, id, github_id, username, avatar=''):
+        self.id        = id
+        self.github_id = github_id
+        self.username  = username
+        self.avatar    = avatar
+
+@login_manager.user_loader
+def _load_user(user_id):
+    conn = get_db()
+    row  = conn.execute('SELECT * FROM users WHERE id=?', (int(user_id),)).fetchone()
+    conn.close()
+    if row:
+        return User(row['id'], row['github_id'],
+                    row['github_username'], row['avatar_url'] or '')
+    return None
+
+def _uid():
+    """Current user's DB id — real id in auth mode, 1 in local mode."""
+    if AUTH_ENABLED and current_user.is_authenticated:
+        return current_user.id
+    return 1
 
 
 # ─────────────────────────────────────────────────────────
@@ -160,9 +209,25 @@ def get_db():
     return conn
 
 
+def _seed_watchlists(conn, uid):
+    """Create 5 default empty watchlists for a brand-new user."""
+    for i in range(1, 6):
+        conn.execute(
+            'INSERT INTO watchlists (user_id, name, position) VALUES (?,?,?)',
+            (uid, f'Watchlist {i}', i))
+    conn.commit()
+
+
 def init_db():
     conn = get_db()
     conn.executescript('''
+        CREATE TABLE IF NOT EXISTS users (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            github_id       INTEGER UNIQUE NOT NULL,
+            github_username TEXT    NOT NULL,
+            avatar_url      TEXT,
+            created_at      TEXT    DEFAULT (datetime(\'now\'))
+        );
         CREATE TABLE IF NOT EXISTS positions (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id        INTEGER NOT NULL DEFAULT 1,
@@ -236,13 +301,11 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass
-    # Seed 5 default watchlists if none exist
-    count = conn.execute('SELECT COUNT(*) FROM watchlists WHERE user_id=1').fetchone()[0]
-    if count == 0:
-        for i in range(1, 6):
-            conn.execute('INSERT INTO watchlists (user_id,name,position) VALUES (?,?,?)',
-                         (1, f'Watchlist {i}', i))
-        conn.commit()
+    # Seed default watchlists for local user (auth mode seeds on first login)
+    if not AUTH_ENABLED:
+        count = conn.execute('SELECT COUNT(*) FROM watchlists WHERE user_id=1').fetchone()[0]
+        if count == 0:
+            _seed_watchlists(conn, 1)
     conn.close()
 
 
@@ -384,6 +447,97 @@ def fetch_stock_data(ticker):
 
 
 # ─────────────────────────────────────────────────────────
+#  AUTH
+# ─────────────────────────────────────────────────────────
+
+_PUBLIC_ENDPOINTS = {'login', 'auth_github', 'auth_callback', 'static'}
+
+@app.before_request
+def _require_auth():
+    """Redirect to login if auth is enabled and user is not logged in."""
+    if not AUTH_ENABLED:
+        return   # local mode — no login required
+    if request.endpoint in _PUBLIC_ENDPOINTS:
+        return   # these routes are always accessible
+    if not current_user.is_authenticated:
+        return redirect(url_for('login'))
+
+
+@app.route('/login')
+def login():
+    if AUTH_ENABLED and current_user.is_authenticated:
+        return redirect(url_for('index'))
+    return render_template('login.html', auth_enabled=AUTH_ENABLED, error=None)
+
+
+@app.route('/auth/github')
+def auth_github():
+    if not AUTH_ENABLED:
+        return redirect(url_for('index'))
+    callback = url_for('auth_callback', _external=True)
+    return _gh.authorize_redirect(callback)
+
+
+@app.route('/auth/github/callback')
+def auth_callback():
+    if not AUTH_ENABLED:
+        return redirect(url_for('index'))
+    try:
+        token   = _gh.authorize_access_token()
+        profile = _gh.get('user', token=token).json()
+    except Exception as e:
+        return render_template('login.html', auth_enabled=True,
+                               error=f'GitHub login failed: {e}')
+
+    username  = profile.get('login', '')
+    github_id = profile.get('id')
+    avatar    = profile.get('avatar_url', '')
+
+    # Check whitelist (empty ALLOWED_USERS = anyone with GitHub can log in)
+    if _ALLOWED_USERS and username.lower() not in _ALLOWED_USERS:
+        return render_template('login.html', auth_enabled=True,
+                               error=f'@{username} is not on the access list. Ask the admin to add you.')
+
+    # Find or create user record
+    conn = get_db()
+    row  = conn.execute('SELECT * FROM users WHERE github_id=?', (github_id,)).fetchone()
+    if row:
+        uid = row['id']
+        conn.execute('UPDATE users SET github_username=?, avatar_url=? WHERE id=?',
+                     (username, avatar, uid))
+        conn.commit()
+    else:
+        cur = conn.execute(
+            'INSERT INTO users (github_id, github_username, avatar_url) VALUES (?,?,?)',
+            (github_id, username, avatar))
+        conn.commit()
+        uid = cur.lastrowid
+        _seed_watchlists(conn, uid)   # give new user their 5 default watchlists
+    conn.close()
+
+    login_user(User(uid, github_id, username, avatar), remember=True)
+    return redirect(url_for('index'))
+
+
+@app.route('/logout')
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+
+@app.route('/api/me')
+def api_me():
+    """Who is the current user? Used by the frontend to show avatar/username."""
+    if not AUTH_ENABLED:
+        return jsonify({'username': 'local', 'avatar': '', 'auth_enabled': False})
+    return jsonify({
+        'username':     current_user.username,
+        'avatar':       current_user.avatar,
+        'auth_enabled': True,
+    })
+
+
+# ─────────────────────────────────────────────────────────
 #  MAIN APP ROUTE
 # ─────────────────────────────────────────────────────────
 
@@ -403,7 +557,7 @@ def get_stock(ticker):
 
 @app.route('/api/prices')
 def get_prices():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     tickers = [r['ticker'] for r in
                conn.execute('SELECT ticker FROM positions WHERE user_id=?', (uid,)).fetchall()]
@@ -441,7 +595,7 @@ def sparkline(ticker):
 
 @app.route('/api/sparklines')
 def sparklines_batch():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     tickers = [r['ticker'] for r in
                conn.execute('SELECT ticker FROM positions WHERE user_id=?', (uid,)).fetchall()]
@@ -479,7 +633,7 @@ def sparklines_batch():
 
 @app.route('/api/portfolio')
 def get_portfolio():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     positions = conn.execute(
         'SELECT * FROM positions WHERE user_id=? ORDER BY ticker', (uid,)).fetchall()
@@ -498,7 +652,7 @@ def get_portfolio():
 
 @app.route('/api/portfolio/buy', methods=['POST'])
 def buy():
-    uid        = LOCAL_USER_ID
+    uid        = _uid()
     d          = request.json
     ticker     = d['ticker'].upper()
     shares     = float(d.get('shares') or 0)
@@ -545,7 +699,7 @@ def buy():
 
 @app.route('/api/portfolio/sell', methods=['POST'])
 def sell():
-    uid        = LOCAL_USER_ID
+    uid        = _uid()
     d          = request.json
     ticker     = d['ticker'].upper()
     shares     = float(d['shares'])
@@ -588,7 +742,7 @@ def sell():
 
 @app.route('/api/portfolio/<ticker>', methods=['PUT'])
 def edit_position(ticker):
-    uid    = LOCAL_USER_ID
+    uid    = _uid()
     d      = request.json
     try:
         shares = float(d['shares'])
@@ -610,7 +764,7 @@ def edit_position(ticker):
 
 @app.route('/api/portfolio/<ticker>', methods=['DELETE'])
 def delete_position(ticker):
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker.upper()))
     conn.commit(); conn.close()
@@ -641,7 +795,7 @@ def historical_price(ticker, trade_date):
 
 @app.route('/api/transactions/<int:txn_id>', methods=['PUT'])
 def edit_transaction(txn_id):
-    uid = LOCAL_USER_ID
+    uid = _uid()
     d   = request.json
     try:
         shares     = float(d['shares'])
@@ -672,7 +826,7 @@ def edit_transaction(txn_id):
 
 @app.route('/api/transactions/<int:txn_id>', methods=['DELETE'])
 def delete_transaction(txn_id):
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     txn  = conn.execute('SELECT * FROM transactions WHERE id=? AND user_id=?',
                         (txn_id, uid)).fetchone()
@@ -708,7 +862,7 @@ def delete_transaction(txn_id):
 @app.route('/api/transactions/deleted')
 def get_deleted_transactions():
     """Return all soft-deleted (trashed) transactions."""
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM transactions WHERE user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''"
@@ -721,7 +875,7 @@ def get_deleted_transactions():
 @app.route('/api/transactions/<int:txn_id>/restore', methods=['POST'])
 def restore_transaction(txn_id):
     """Restore a soft-deleted transaction from the recycle bin."""
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     txn  = conn.execute(
         "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
@@ -754,7 +908,7 @@ def restore_transaction(txn_id):
 @app.route('/api/transactions/<int:txn_id>/permanent', methods=['DELETE'])
 def permanent_delete_transaction(txn_id):
     """Permanently delete a transaction that is already in the recycle bin."""
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     txn  = conn.execute(
         "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
@@ -790,7 +944,7 @@ def api_market_status():
 
 @app.route('/api/realized-pnl')
 def get_realized_pnl():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     rows = conn.execute('''
         SELECT *,
@@ -808,7 +962,7 @@ def get_realized_pnl():
 
 @app.route('/api/transactions')
 def get_transactions():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM transactions WHERE user_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY date DESC LIMIT 200",
@@ -823,7 +977,7 @@ def get_transactions():
 
 @app.route('/api/watchlists')
 def get_watchlists():
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     wls  = conn.execute(
         'SELECT * FROM watchlists WHERE user_id=? ORDER BY position', (uid,)).fetchall()
@@ -840,7 +994,7 @@ def get_watchlists():
 
 @app.route('/api/watchlists/<int:wl_id>', methods=['PUT'])
 def rename_watchlist(wl_id):
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     name = (request.json.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'error': 'Name required.'}), 400
@@ -852,7 +1006,7 @@ def rename_watchlist(wl_id):
 
 @app.route('/api/watchlists/<int:wl_id>/items', methods=['POST'])
 def add_watchlist_item(wl_id):
-    uid    = LOCAL_USER_ID
+    uid    = _uid()
     ticker = (request.json.get('ticker') or '').strip().upper()
     if not ticker:
         return jsonify({'success': False, 'error': 'Ticker required.'}), 400
@@ -874,7 +1028,7 @@ def add_watchlist_item(wl_id):
 
 @app.route('/api/watchlists/<int:wl_id>/items/<ticker>', methods=['DELETE'])
 def remove_watchlist_item(wl_id, ticker):
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     conn.execute('DELETE FROM watchlist_items WHERE watchlist_id=? AND ticker=?',
                  (wl_id, ticker.upper()))
@@ -884,7 +1038,7 @@ def remove_watchlist_item(wl_id, ticker):
 
 @app.route('/api/watchlists/<int:wl_id>/prices')
 def watchlist_prices(wl_id):
-    uid  = LOCAL_USER_ID
+    uid  = _uid()
     conn = get_db()
     rows = conn.execute(
         'SELECT ticker FROM watchlist_items WHERE watchlist_id=?', (wl_id,)).fetchall()

@@ -10,6 +10,8 @@ import time
 import subprocess
 import webbrowser
 
+from updater import start_update_check
+
 # ── Paths ───────────────────────────────────────────────────
 if getattr(sys, 'frozen', False):
     BASE_DIR = sys._MEIPASS          # PyInstaller temp extract folder
@@ -113,6 +115,8 @@ if __name__ == '__main__':
             '--disable-extensions',
             f'--user-data-dir={profile_dir}',
         ])
+        # Check for updates silently in background (shows dialog if new version found)
+        start_update_check(browser_proc=proc)
         # Block until the browser window is closed, then the process exits
         proc.wait()
     else:

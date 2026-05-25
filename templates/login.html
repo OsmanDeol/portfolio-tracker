@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Portfolio Tracker — Sign In</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:     #0d1117;
+    --bg2:    #161b22;
+    --border: #30363d;
+    --txt:    #e6edf3;
+    --txt2:   #8b949e;
+    --acc:    #58a6ff;
+    --gain:   #3fb950;
+    --loss:   #f85149;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--txt);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card {
+    width: 340px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 32px 32px;
+    text-align: center;
+  }
+
+  .logo {
+    font-size: 28px;
+    margin-bottom: 6px;
+  }
+  .app-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--txt);
+    margin-bottom: 6px;
+  }
+  .tagline {
+    font-size: 13px;
+    color: var(--txt2);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 24px 0;
+  }
+
+  .btn-github {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 16px;
+    background: var(--txt);
+    color: #0d1117;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity .15s;
+  }
+  .btn-github:hover { opacity: .88; }
+  .btn-github svg { flex-shrink: 0; }
+
+  .error {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: rgba(248,81,73,.12);
+    border: 1px solid rgba(248,81,73,.3);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--loss);
+    text-align: left;
+    line-height: 1.5;
+  }
+
+  .footer {
+    margin-top: 24px;
+    font-size: 11px;
+    color: var(--txt2);
+    line-height: 1.6;
+  }
+  .footer a { color: var(--acc); text-decoration: none; }
+
+  /* Animated background dots */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(88,166,255,.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(63,185,80,.05) 0%, transparent 50%);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">📈</div>
+  <div class="app-name">Portfolio Tracker</div>
+  <div class="tagline">Track your investments, analyse stocks,<br/>and get AI-powered insights.</div>
+
+  {% if auth_enabled %}
+    <a href="/auth/github" class="btn-github">
+      <!-- GitHub mark SVG -->
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57
+                 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41
+                 -1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815
+                 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925
+                 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23
+                 .96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65
+                 .24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925
+                 .435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57
+                 A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+      </svg>
+      Continue with GitHub
+    </a>
+
+    {% if error %}
+      <div class="error">⚠ {{ error }}</div>
+    {% endif %}
+
+  {% else %}
+    <div style="font-size:13px;color:var(--txt2);padding:12px;background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.2);border-radius:6px">
+      Running in local mode — no login required.
+      <a href="/" style="display:block;margin-top:8px;color:var(--acc)">Open app →</a>
+    </div>
+  {% endif %}
+
+  <hr class="divider"/>
+
+  <div class="footer">
+    Sign-in is powered by GitHub OAuth.<br/>
+    We only read your public username — nothing else.<br/>
+    <a href="https://github.com/OsmanDeol/portfolio-tracker" target="_blank">View source on GitHub</a>
+  </div>
+</div>
+
+</body>
+</html>

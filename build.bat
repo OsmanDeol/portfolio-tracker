@@ -1,9 +1,18 @@
 @echo off
-title Portfolio Tracker — Build
+title Portfolio Tracker — Local Dev Build
 echo.
 echo  ============================================
-echo   Portfolio Tracker  —  Build Script
+echo   Portfolio Tracker  —  Local Dev Build
 echo  ============================================
+echo.
+echo  NOTE: This produces a DEV build (no auto-update).
+echo  To release a real versioned build, push a git tag:
+echo.
+echo    git tag v1.2.0
+echo    git push origin v1.2.0
+echo.
+echo  GitHub Actions will build + publish automatically.
+echo  ─────────────────────────────────────────────────
 echo.
 
 REM ── Step 1: Dependencies ─────────────────────────────────
