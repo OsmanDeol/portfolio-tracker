@@ -369,12 +369,36 @@ def fetch_stock_data(ticker):
         chg   = price - prev if prev else 0
         chgp  = (chg / prev * 100) if prev else 0
 
+        # Pre/post prices — try info dict first, then reliable 1-min history fallback
         pre_p   = info.get('preMarketPrice')
         post_p  = info.get('postMarketPrice')
         pre_cp  = info.get('preMarketChangePercent') or 0
         post_cp = info.get('postMarketChangePercent') or 0
         if pre_cp  and abs(pre_cp)  < 1: pre_cp  *= 100
         if post_cp and abs(post_cp) < 1: post_cp *= 100
+
+        # Reliable fallback: 1-min bars with pre/post hours included.
+        # Yahoo's info dict often omits preMarketPrice even during pre-market —
+        # history(prepost=True) always has the actual latest tick.
+        if not pre_p and not post_p:
+            try:
+                hist_pp = stock.history(period='1d', interval='1m', prepost=True)
+                if not hist_pp.empty:
+                    last_px = float(hist_pp['Close'].iloc[-1])
+                    last_ts = hist_pp.index[-1]
+                    last_et = (last_ts.tz_convert(ET)
+                               if hasattr(last_ts, 'tz_convert') else last_ts)
+                    h, m = last_et.hour, last_et.minute
+                    # Pre-market: 4:00 AM – 9:29 AM ET
+                    if (4 <= h < 9) or (h == 9 and m < 30):
+                        pre_p  = last_px
+                        pre_cp = round((last_px - prev) / prev * 100, 2) if prev else 0
+                    # Post-market: 4:00 PM – 8:00 PM ET
+                    elif 16 <= h < 20:
+                        post_p  = last_px
+                        post_cp = round((last_px - prev) / prev * 100, 2) if prev else 0
+            except Exception:
+                pass
 
         earnings_date = None
         try:
