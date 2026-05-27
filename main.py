@@ -42,7 +42,7 @@ from app import app as flask_app  # noqa: E402
 
 def _run_flask():
     flask_app.run(
-        host='127.0.0.1', port=PORT,
+        host='0.0.0.0', port=PORT,
         debug=False, threaded=True, use_reloader=False,
     )
 
