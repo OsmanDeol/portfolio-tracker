@@ -1434,7 +1434,11 @@ Short % of Float: {short_pct} | Short Ratio (days to cover): {short_ratio}
 init_db()
 
 if __name__ == '__main__':
+    import socket
+    local_ip = socket.gethostbyname(socket.gethostname())
+    port = int(os.environ.get('PORT', 5000))
     print('\n  Portfolio Tracker  —  Local')
     print('  ────────────────────────────')
-    print('  Open: http://127.0.0.1:5000\n')
-    app.run(debug=False, port=int(os.environ.get('PORT', 5000)), threaded=True)
+    print(f'  Browser : http://127.0.0.1:{port}')
+    print(f'  iPhone  : http://{local_ip}:{port}\n')
+    app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
