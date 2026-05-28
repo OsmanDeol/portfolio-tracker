@@ -135,7 +135,7 @@ def _show_dialog(version, url, size_bytes, browser_proc):
         skip_btn.config(state='disabled')
         bar.pack(fill='x', padx=20, pady=(8, 0))
         status.pack(fill='x', padx=20, pady=(2, 0))
-        root.geometry("420:250")   # grow slightly
+        root.geometry("420x250")   # grow slightly
 
         def _download():
             try:
