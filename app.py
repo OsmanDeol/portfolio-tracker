@@ -1148,12 +1148,13 @@ def ai_analyze():
     """Full AI stock analysis: technicals + fundamentals + macro + news + analysts."""
     d       = request.json or {}
     ticker  = (d.get('ticker') or '').strip().upper()
-    api_key = (d.get('api_key') or '').strip()
+    # Client may supply its own key; fall back to server-side env var
+    api_key = (d.get('api_key') or '').strip() or os.environ.get('GROQ_API_KEY', '').strip()
     if not ticker:
         return jsonify({'success': False, 'error': 'Ticker required.'}), 400
     if not api_key:
         return jsonify({'success': False,
-                        'error': 'No API key. Add your Groq key in Settings.'}), 400
+                        'error': 'No Groq API key configured. Add GROQ_API_KEY to the server environment or enter your key in the app Settings.'}), 400
 
     try:
         # ── Core stock data ───────────────────────────────────
