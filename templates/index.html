@@ -906,7 +906,6 @@ const COL_DEFS = [
   {id:'price',    label:'Price',          width:100, sortable:true,  reorderable:true},
   {id:'change',   label:'Day Change',     width:140, sortable:true,  reorderable:true},
   {id:'daychart', label:'Day Chart',      width:95,  sortable:false, reorderable:true},
-  {id:'extended', label:'Extended Hrs',   width:120, sortable:false, reorderable:true},
   {id:'shares',   label:'Shares',         width:80,  sortable:true,  reorderable:true},
   {id:'avg',      label:'Avg Buy',        width:95,  sortable:true,  reorderable:true},
   {id:'invested', label:'Invested',       width:110, sortable:true,  reorderable:true},
@@ -1016,17 +1015,9 @@ function loadPrefs() {
     colVisible    = s.colVisible|| {};
     summaryVisible= s.summaryVisible !== false;
 
-    // Migrate old 'pre'/'post' columns → 'extended'
-    const preIdx = colOrder.indexOf('pre'), postIdx = colOrder.indexOf('post');
-    if (preIdx !== -1 || postIdx !== -1) {
-      const insertAt = preIdx !== -1 ? preIdx : postIdx;
-      if (!colOrder.includes('extended')) colOrder.splice(insertAt, 0, 'extended');
-      colOrder = colOrder.filter(id => id !== 'pre' && id !== 'post');
-      // Merge visibility: extended is visible if either pre or post was visible
-      if (colVisible['extended'] == null)
-        colVisible['extended'] = (colVisible['pre'] !== false || colVisible['post'] !== false);
-      delete colVisible['pre']; delete colVisible['post'];
-    }
+    // Remove old pre/post/extended columns — price column now handles all sessions
+    colOrder = colOrder.filter(id => id !== 'pre' && id !== 'post' && id !== 'extended');
+    delete colVisible['pre']; delete colVisible['post']; delete colVisible['extended'];
 
     COL_DEFS.forEach(c => { if (colVisible[c.id] == null) colVisible[c.id] = true; });
     ['ticker','actions'].forEach(id => { if (!colOrder.includes(id)) colOrder.push(id); });
@@ -1355,12 +1346,21 @@ function renderCell(id, pos, p) {
       return `<span style="color:var(--txt)">${p.name||pos.ticker}</span>`;
 
     case 'price': {
-      // Always show the official market price / last close here.
-      // Pre/post prices are shown in their own dedicated columns.
+      if (mktSt === 'pre' && p.pre_price) {
+        const cls=p.pre_chg_pct>=0?'gain':'loss', s=p.pre_chg_pct>=0?'+':'';
+        return `<span class="mono" style="font-size:13px">$${p.pre_price.toFixed(2)}</span>
+                <span class="mkt-tag" style="background:rgba(255,165,0,.12);color:orange;border-color:rgba(255,165,0,.3);margin-left:4px">PRE</span>
+                <span class="mkt-sub ${cls}" style="display:block">${s}${(p.pre_chg_pct||0).toFixed(2)}%</span>`;
+      }
+      if (mktSt === 'post' && p.post_price) {
+        const cls=p.post_chg_pct>=0?'gain':'loss', s=p.post_chg_pct>=0?'+':'';
+        return `<span class="mono" style="font-size:13px">$${p.post_price.toFixed(2)}</span>
+                <span class="mkt-tag" style="background:rgba(255,165,0,.12);color:orange;border-color:rgba(255,165,0,.3);margin-left:4px">POST</span>
+                <span class="mkt-sub ${cls}" style="display:block">${s}${(p.post_chg_pct||0).toFixed(2)}%</span>`;
+      }
       const dp = p.display_price || p.price || 0;
       if (!dp) return '<span class="dim">—</span>';
-      const label = (mktSt==='pre'||mktSt==='post'||mktSt==='closed')
-                  ? '<span class="mkt-tag close-tag">CLOSE</span>' : '';
+      const label = mktSt==='closed' ? '<span class="mkt-tag close-tag">CLOSE</span>' : '';
       return `<span class="mono" style="font-size:13px">$${dp.toFixed(2)}</span>${label}`;
     }
 
@@ -2506,7 +2506,6 @@ const WL_COL_DEFS = [
   {id:'wl-ticker',   label:'Ticker',       width:90,  hideable:false},
   {id:'wl-name',     label:'Name',         width:170},
   {id:'wl-price',    label:'Price',        width:100},
-  {id:'wl-extended',  label:'Extended Hrs', width:120},
   {id:'wl-open',     label:'Open',         width:90},
   {id:'wl-high',     label:'Day High',     width:90},
   {id:'wl-low',      label:'Day Low',      width:90},
@@ -2530,16 +2529,9 @@ function loadWlPrefs() {
     wlColVisible = s.visible || {};
     wlColOrder   = s.order   || WL_COL_DEFS.map(c=>c.id);
 
-    // Migrate old 'wl-pre'/'wl-post' → 'wl-extended'
-    const preIdx = wlColOrder.indexOf('wl-pre'), postIdx = wlColOrder.indexOf('wl-post');
-    if (preIdx !== -1 || postIdx !== -1) {
-      const insertAt = preIdx !== -1 ? preIdx : postIdx;
-      if (!wlColOrder.includes('wl-extended')) wlColOrder.splice(insertAt, 0, 'wl-extended');
-      wlColOrder = wlColOrder.filter(id => id !== 'wl-pre' && id !== 'wl-post');
-      if (wlColVisible['wl-extended'] == null)
-        wlColVisible['wl-extended'] = (wlColVisible['wl-pre'] !== false || wlColVisible['wl-post'] !== false);
-      delete wlColVisible['wl-pre']; delete wlColVisible['wl-post'];
-    }
+    // Remove old pre/post/extended columns — wl-price now handles all sessions
+    wlColOrder = wlColOrder.filter(id => id !== 'wl-pre' && id !== 'wl-post' && id !== 'wl-extended');
+    delete wlColVisible['wl-pre']; delete wlColVisible['wl-post']; delete wlColVisible['wl-extended'];
 
     WL_COL_DEFS.forEach(c => { if (wlColVisible[c.id]==null) wlColVisible[c.id]=true; });
   } catch {
@@ -2693,9 +2685,20 @@ function renderWlCell(id, ticker, p) {
     case 'wl-name':
       return `<span style="color:var(--txt)">${p.name||ticker}</span>`;
     case 'wl-price': {
+      if (_mktStatus === 'pre' && p.pre_price) {
+        const cls=p.pre_chg_pct>=0?'gain':'loss', s=p.pre_chg_pct>=0?'+':'';
+        return `<span class="mono">$${p.pre_price.toFixed(2)}</span>
+                <span class="mkt-tag" style="background:rgba(255,165,0,.12);color:orange;border-color:rgba(255,165,0,.3);margin-left:4px">PRE</span>
+                <span class="mkt-sub ${cls}">${s}${(p.pre_chg_pct||0).toFixed(2)}%</span>`;
+      }
+      if (_mktStatus === 'post' && p.post_price) {
+        const cls=p.post_chg_pct>=0?'gain':'loss', s=p.post_chg_pct>=0?'+':'';
+        return `<span class="mono">$${p.post_price.toFixed(2)}</span>
+                <span class="mkt-tag" style="background:rgba(255,165,0,.12);color:orange;border-color:rgba(255,165,0,.3);margin-left:4px">POST</span>
+                <span class="mkt-sub ${cls}">${s}${(p.post_chg_pct||0).toFixed(2)}%</span>`;
+      }
       if (!dp) return '<span class="dim">—</span>';
-      const tag = (p.market_status==='pre'||p.market_status==='post'||p.market_status==='closed')
-                ? '<span class="mkt-tag close-tag">Close</span>' : '';
+      const tag = _mktStatus==='closed' ? '<span class="mkt-tag close-tag">Close</span>' : '';
       return `<span class="mono">$${dp.toFixed(2)}</span>${tag}`;
     }
     case 'wl-extended': {
