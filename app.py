@@ -53,7 +53,8 @@ DB_PATH         = os.environ.get('DB_PATH', 'portfolio.db')
 price_cache     = {}
 sparkline_cache = {}
 cache_lock      = threading.Lock()
-PRICE_TTL       = 60    # shared server cache: one yfinance call/min per ticker
+PRICE_TTL       = 90    # shared server cache: reduce Yahoo Finance call frequency
+PRICE_STALE_TTL = 600   # serve stale data for up to 10 min if Yahoo is rate-limiting
 SPARKLINE_TTL   = 300
 ET              = ZoneInfo('America/New_York')
 
@@ -359,13 +360,31 @@ def fetch_stock_data(ticker):
     with cache_lock:
         if ticker in price_cache:
             c = price_cache[ticker]
-            if time.time() - c['ts'] < PRICE_TTL:
+            age = time.time() - c['ts']
+            if age < PRICE_TTL:
                 return c['data']
+            # TTL expired but keep stale copy in case new fetch fails
+            stale = c['data']
+        else:
+            stale = None
     try:
         stock = yf.Ticker(ticker)
-        info  = stock.info
-        price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
-        prev  = info.get('previousClose') or info.get('regularMarketPreviousClose') or price
+
+        # Try fast_info first (lightweight, less rate-limited)
+        try:
+            fi    = stock.fast_info
+            price = getattr(fi, 'last_price', None) or getattr(fi, 'regular_market_price', None) or 0
+            prev  = getattr(fi, 'previous_close', None) or getattr(fi, 'regular_market_previous_close', None) or price
+        except Exception:
+            price, prev = 0, 0
+
+        # Fall back to full info if fast_info gave nothing
+        if not price:
+            info  = stock.info
+            price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+            prev  = info.get('previousClose') or info.get('regularMarketPreviousClose') or price
+        else:
+            info  = stock.info
         chg   = price - prev if prev else 0
         chgp  = (chg / prev * 100) if prev else 0
 
@@ -463,10 +482,19 @@ def fetch_stock_data(ticker):
                               if info.get('exDividendDate') else None,
             'success': True,
         }
+        # If Yahoo returned zeros (rate-limited), serve stale data instead
+        if not data.get('price') and not data.get('prev_close') and stale:
+            stale['stale'] = True
+            return stale
+
         with cache_lock:
             price_cache[ticker] = {'data': data, 'ts': time.time()}
         return data
     except Exception as e:
+        # On any error, serve stale data if it's not too old
+        if stale and (time.time() - (price_cache.get(ticker) or {}).get('ts', 0) < PRICE_STALE_TTL):
+            stale['stale'] = True
+            return stale
         return {'ticker': ticker, 'success': False, 'error': str(e)}
 
 
