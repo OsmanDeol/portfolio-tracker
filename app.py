@@ -357,38 +357,42 @@ def recalculate_position(conn, uid, ticker):
 
 def fetch_stock_data(ticker):
     ticker = ticker.upper()
+    # Capture stale data + its timestamp inside the lock so the except
+    # block can check age without re-reading (potentially modified) cache.
     with cache_lock:
         if ticker in price_cache:
             c = price_cache[ticker]
-            age = time.time() - c['ts']
-            if age < PRICE_TTL:
+            if time.time() - c['ts'] < PRICE_TTL:
                 return c['data']
-            # TTL expired but keep stale copy in case new fetch fails
-            stale = c['data']
+            stale    = c['data']
+            stale_ts = c['ts']
         else:
-            stale = None
+            stale    = None
+            stale_ts = 0
+
     try:
         stock = yf.Ticker(ticker)
 
-        # Try fast_info first (lightweight, less rate-limited)
-        try:
-            fi    = stock.fast_info
-            price = getattr(fi, 'last_price', None) or getattr(fi, 'regular_market_price', None) or 0
-            prev  = getattr(fi, 'previous_close', None) or getattr(fi, 'regular_market_previous_close', None) or price
-        except Exception:
-            price, prev = 0, 0
+        # ── Primary: full info (has all fields we need) ──────────────
+        info  = stock.info
+        price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+        prev  = info.get('previousClose') or info.get('regularMarketPreviousClose') or price
 
-        # Fall back to full info if fast_info gave nothing
+        # ── Fallback: fast_info when info is empty (Yahoo rate-limited) ──
+        # fast_info hits a lighter endpoint and is rarely blocked.
+        # It only gives us price/prev — extended fields come from stale cache.
         if not price:
-            info  = stock.info
-            price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
-            prev  = info.get('previousClose') or info.get('regularMarketPreviousClose') or price
-        else:
-            info  = stock.info
-        chg   = price - prev if prev else 0
-        chgp  = (chg / prev * 100) if prev else 0
+            try:
+                fi    = stock.fast_info
+                price = getattr(fi, 'last_price',    None) or 0
+                prev  = getattr(fi, 'previous_close', None) or price
+            except Exception:
+                pass
 
-        # Pre/post prices — try info dict first, then reliable 1-min history fallback
+        chg  = price - prev if prev else 0
+        chgp = (chg / prev * 100) if prev else 0
+
+        # ── Pre/post prices ──────────────────────────────────────────
         pre_p   = info.get('preMarketPrice')
         post_p  = info.get('postMarketPrice')
         pre_cp  = info.get('preMarketChangePercent') or 0
@@ -408,12 +412,10 @@ def fetch_stock_data(ticker):
                     last_et = (last_ts.tz_convert(ET)
                                if hasattr(last_ts, 'tz_convert') else last_ts)
                     h, m = last_et.hour, last_et.minute
-                    # Pre-market: 4:00 AM – 9:29 AM ET
-                    if (4 <= h < 9) or (h == 9 and m < 30):
+                    if (4 <= h < 9) or (h == 9 and m < 30):   # pre-market 4–9:29 ET
                         pre_p  = last_px
                         pre_cp = round((last_px - prev) / prev * 100, 2) if prev else 0
-                    # Post-market: 4:00 PM – 8:00 PM ET
-                    elif 16 <= h < 20:
+                    elif 16 <= h < 20:                          # post-market 4–8 PM ET
                         post_p  = last_px
                         post_cp = round((last_px - prev) / prev * 100, 2) if prev else 0
             except Exception:
@@ -433,34 +435,25 @@ def fetch_stock_data(ticker):
         except Exception:
             pass
 
-        # Decide effective price based on current market session
+        # ── Effective price for P&L calculations ────────────────────
         sess   = market_session()
         status = sess['status']
         if status == 'pre'  and pre_p:
-            eff_price = pre_p
-            eff_chg   = pre_p - prev
-            eff_chgp  = (eff_chg / prev * 100) if prev else 0
+            eff_price = pre_p;  eff_chg = pre_p  - prev
         elif status == 'post' and post_p:
-            eff_price = post_p
-            eff_chg   = post_p - prev
-            eff_chgp  = (eff_chg / prev * 100) if prev else 0
+            eff_price = post_p; eff_chg = post_p - prev
         else:
-            eff_price = price or prev
-            eff_chg   = chg
-            eff_chgp  = chgp
+            eff_price = price or prev; eff_chg = chg
+        eff_chgp = (eff_chg / prev * 100) if prev else 0
 
         data = {
-            'ticker': ticker,
-            'name': info.get('longName') or info.get('shortName', ticker),
+            'ticker':       ticker,
+            'name':         info.get('longName') or info.get('shortName', ticker),
             'price':        price,
             'prev_close':   prev,
             'change':       chg,
             'change_pct':   chgp,
-            # display_price: always the official market price / last close
-            # (never pre/post) — shown in the Price column
             'display_price':        price or prev,
-            # effective_price: most current price including pre/post
-            # — used for all portfolio value / P&L calculations
             'effective_price':      eff_price,
             'effective_change':     eff_chg,
             'effective_change_pct': eff_chgp,
@@ -468,21 +461,22 @@ def fetch_stock_data(ticker):
             'pre_price':    pre_p,  'pre_chg_pct':  pre_cp,
             'post_price':   post_p, 'post_chg_pct': post_cp,
             'earnings_date': earnings_date,
-            'day_high':  info.get('dayHigh', 0),
-            'day_low':   info.get('dayLow', 0),
-            'open_price': info.get('regularMarketOpen') or info.get('open', 0),
-            'volume':    info.get('volume', 0),
-            'exchange':  info.get('exchange', 'NASDAQ'),
-            'market_cap':     info.get('marketCap', 0),
-            'week_52_high':   info.get('fiftyTwoWeekHigh', 0),
-            'week_52_low':    info.get('fiftyTwoWeekLow', 0),
-            'dividend_rate':  info.get('dividendRate', 0),
-            'dividend_yield': round((info.get('dividendYield') or 0) * 100, 2),
-            'ex_div_date':    str(date.fromtimestamp(info['exDividendDate']))
-                              if info.get('exDividendDate') else None,
+            'day_high':     info.get('dayHigh', 0),
+            'day_low':      info.get('dayLow', 0),
+            'open_price':   info.get('regularMarketOpen') or info.get('open', 0),
+            'volume':       info.get('volume', 0),
+            'exchange':     info.get('exchange', 'NASDAQ'),
+            'market_cap':       info.get('marketCap', 0),
+            'week_52_high':     info.get('fiftyTwoWeekHigh', 0),
+            'week_52_low':      info.get('fiftyTwoWeekLow', 0),
+            'dividend_rate':    info.get('dividendRate', 0),
+            'dividend_yield':   round((info.get('dividendYield') or 0) * 100, 2),
+            'ex_div_date':      str(date.fromtimestamp(info['exDividendDate']))
+                                if info.get('exDividendDate') else None,
             'success': True,
         }
-        # If Yahoo returned zeros (rate-limited), serve stale data instead
+
+        # If Yahoo returned zeros (rate-limited), keep serving stale data
         if not data.get('price') and not data.get('prev_close') and stale:
             stale['stale'] = True
             return stale
@@ -490,9 +484,12 @@ def fetch_stock_data(ticker):
         with cache_lock:
             price_cache[ticker] = {'data': data, 'ts': time.time()}
         return data
+
     except Exception as e:
-        # On any error, serve stale data if it's not too old
-        if stale and (time.time() - (price_cache.get(ticker) or {}).get('ts', 0) < PRICE_STALE_TTL):
+        # On any network/parse error, serve stale data if not too old.
+        # Use stale_ts captured inside the lock at the top — safe from
+        # concurrent cache updates by other threads.
+        if stale and (time.time() - stale_ts < PRICE_STALE_TTL):
             stale['stale'] = True
             return stale
         return {'ticker': ticker, 'success': False, 'error': str(e)}
