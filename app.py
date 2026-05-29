@@ -10,7 +10,7 @@ import json
 
 import groq as groq_sdk
 import yfinance as yf
-from flask import Flask, jsonify, render_template, request, redirect, url_for, session
+from flask import Flask, g, jsonify, render_template, request, redirect, url_for, session
 from flask_cors import CORS
 from flask_login import (LoginManager, UserMixin,
                          login_user, logout_user, current_user)
@@ -71,7 +71,6 @@ class User(UserMixin):
 def _load_user(user_id):
     conn = get_db()
     row  = conn.execute('SELECT * FROM users WHERE id=?', (int(user_id),)).fetchone()
-    conn.close()
     if row:
         return User(row['id'], row['github_id'],
                     row['github_username'], row['avatar_url'] or '')
@@ -204,10 +203,22 @@ def market_session(now_et=None):
 # ─────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    # Return the per-request DB connection, creating it once if needed.
+    # Flask teardown_appcontext closes it automatically at request end.
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH, check_same_thread=False)
+        g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA journal_mode=WAL")
+        g.db.execute("PRAGMA synchronous=NORMAL")   # safe with WAL, ~2× faster writes
+        g.db.execute("PRAGMA cache_size=10000")     # 10 MB page cache per connection
+        g.db.execute("PRAGMA temp_store=MEMORY")    # temp tables in RAM
+    return g.db
+
+@app.teardown_appcontext
+def _close_db(exc):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 
 def _seed_watchlists(conn, uid):
@@ -219,8 +230,16 @@ def _seed_watchlists(conn, uid):
     conn.commit()
 
 
+def _raw_db():
+    """Plain connection for startup use (no Flask request context available)."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
 def init_db():
-    conn = get_db()
+    conn = _raw_db()
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS users (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -307,7 +326,6 @@ def init_db():
         count = conn.execute('SELECT COUNT(*) FROM watchlists WHERE user_id=1').fetchone()[0]
         if count == 0:
             _seed_watchlists(conn, 1)
-    conn.close()
 
 
 def recalculate_position(conn, uid, ticker):
@@ -562,7 +580,6 @@ def auth_callback():
         conn.commit()
         uid = cur.lastrowid
         _seed_watchlists(conn, uid)   # give new user their 5 default watchlists
-    conn.close()
 
     login_user(User(uid, github_id, username, avatar), remember=True)
     return redirect(url_for('index'))
@@ -610,69 +627,57 @@ def get_prices():
     conn = get_db()
     tickers = [r['ticker'] for r in
                conn.execute('SELECT ticker FROM positions WHERE user_id=?', (uid,)).fetchall()]
-    conn.close()
     results = {}
     threads = []
     def _f(t): results[t] = fetch_stock_data(t)
     for t in tickers:
         th = threading.Thread(target=_f, args=(t,), daemon=True)
         threads.append(th); th.start()
-    for th in threads: th.join(timeout=10)
+    for th in threads: th.join(timeout=12)
+    # Return whatever finished — stale cache covers any that timed out
     return jsonify(results)
 
 
-@app.route('/api/sparkline/<ticker>')
-def sparkline(ticker):
+def _fetch_sparkline(ticker):
+    """Shared sparkline fetch with cache. Safe to call from any thread."""
     ticker = ticker.upper()
     with cache_lock:
         if ticker in sparkline_cache:
             c = sparkline_cache[ticker]
             if time.time() - c['ts'] < SPARKLINE_TTL:
-                return jsonify(c['data'])
+                return c['data']
     try:
-        hist = yf.Ticker(ticker).history(period='1d', interval='5m')
+        stock = yf.Ticker(ticker)
+        hist  = stock.history(period='1d', interval='5m')
         if hist.empty or len(hist) < 3:
-            hist = yf.Ticker(ticker).history(period='2d', interval='15m')
+            hist = stock.history(period='2d', interval='15m')
         prices = [round(float(p), 4) for p in hist['Close'].dropna().tolist()]
         data   = {'prices': prices, 'success': True}
         with cache_lock:
             sparkline_cache[ticker] = {'data': data, 'ts': time.time()}
-        return jsonify(data)
+        return data
     except Exception as e:
-        return jsonify({'prices': [], 'success': False, 'error': str(e)})
+        return {'prices': [], 'success': False, 'error': str(e)}
+
+
+@app.route('/api/sparkline/<ticker>')
+def sparkline(ticker):
+    return jsonify(_fetch_sparkline(ticker.upper()))
 
 
 @app.route('/api/sparklines')
 def sparklines_batch():
-    uid  = _uid()
-    conn = get_db()
+    uid     = _uid()
+    conn    = get_db()
     tickers = [r['ticker'] for r in
                conn.execute('SELECT ticker FROM positions WHERE user_id=?', (uid,)).fetchall()]
-    conn.close()
     results = {}
     threads = []
-    def fetch(t):
-        t = t.upper()
-        with cache_lock:
-            if t in sparkline_cache:
-                c = sparkline_cache[t]
-                if time.time() - c['ts'] < SPARKLINE_TTL:
-                    results[t] = c['data']; return
-        try:
-            hist = yf.Ticker(t).history(period='1d', interval='5m')
-            if hist.empty or len(hist) < 3:
-                hist = yf.Ticker(t).history(period='2d', interval='15m')
-            prices = [round(float(p), 4) for p in hist['Close'].dropna().tolist()]
-            d = {'prices': prices, 'success': True}
-            with cache_lock:
-                sparkline_cache[t] = {'data': d, 'ts': time.time()}
-            results[t] = d
-        except Exception:
-            results[t] = {'prices': [], 'success': False}
+    def _f(t): results[t] = _fetch_sparkline(t)
     for t in tickers:
-        th = threading.Thread(target=fetch, args=(t,), daemon=True)
+        th = threading.Thread(target=_f, args=(t,), daemon=True)
         threads.append(th); th.start()
-    for th in threads: th.join(timeout=20)
+    for th in threads: th.join(timeout=15)
     return jsonify(results)
 
 
@@ -689,7 +694,6 @@ def get_portfolio():
     realized  = conn.execute(
         'SELECT ticker, SUM(net_profit_loss) as total FROM realized_pnl WHERE user_id=? GROUP BY ticker',
         (uid,)).fetchall()
-    conn.close()
     r_map  = {r['ticker']: (r['total'] or 0) for r in realized}
     result = []
     for p in positions:
@@ -701,13 +705,16 @@ def get_portfolio():
 
 @app.route('/api/portfolio/buy', methods=['POST'])
 def buy():
-    uid        = _uid()
-    d          = request.json
-    ticker     = d['ticker'].upper()
-    shares     = float(d.get('shares') or 0)
-    price      = float(d.get('price')  or 0)
-    commission = float(d.get('commission', 0))
-    trade_date = d.get('trade_date', '')
+    uid = _uid()
+    d   = request.json or {}
+    try:
+        ticker     = d['ticker'].upper()
+        shares     = float(d.get('shares') or 0)
+        price      = float(d.get('price')  or 0)
+        commission = float(d.get('commission', 0))
+        trade_date = d.get('trade_date', '')
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid request data.'}), 400
 
     conn = get_db()
 
@@ -720,47 +727,49 @@ def buy():
             conn.commit()
         except sqlite3.IntegrityError:
             pass   # already exists — nothing to do
-        conn.close()
         return jsonify({'success': True, 'track_only': True})
 
-    # ── Normal buy ────────────────────────────────────────────
+    # ── Normal buy (IMMEDIATE lock prevents concurrent read-modify-write) ──
     total_cost = shares * price + commission
-    eff_avg    = total_cost / shares
-    existing   = conn.execute(
+    conn.execute('BEGIN IMMEDIATE')
+    existing = conn.execute(
         'SELECT * FROM positions WHERE user_id=? AND ticker=?', (uid, ticker)).fetchone()
     if existing:
         ns  = existing['shares']         + shares
         ni  = existing['total_invested'] + total_cost
-        nav = ni / ns
         conn.execute(
             'UPDATE positions SET shares=?,avg_buy_price=?,total_invested=? WHERE user_id=? AND ticker=?',
-            (ns, nav, ni, uid, ticker))
+            (ns, ni / ns, ni, uid, ticker))
     else:
         conn.execute(
             'INSERT INTO positions (user_id,ticker,shares,avg_buy_price,total_invested) VALUES (?,?,?,?,?)',
-            (uid, ticker, shares, eff_avg, total_cost))
+            (uid, ticker, shares, total_cost / shares, total_cost))
     conn.execute(
         'INSERT INTO transactions (user_id,ticker,type,shares,price,commission,total,trade_date) VALUES (?,?,?,?,?,?,?,?)',
         (uid, ticker, 'buy', shares, price, commission, total_cost, trade_date))
-    conn.commit(); conn.close()
+    conn.commit()
     return jsonify({'success': True})
 
 
 @app.route('/api/portfolio/sell', methods=['POST'])
 def sell():
-    uid        = _uid()
-    d          = request.json
-    ticker     = d['ticker'].upper()
-    shares     = float(d['shares'])
-    price      = float(d['price'])
-    commission = float(d.get('commission', 0))
-    trade_date = d.get('trade_date', '')
+    uid = _uid()
+    d   = request.json or {}
+    try:
+        ticker     = d['ticker'].upper()
+        shares     = float(d['shares'])
+        price      = float(d['price'])
+        commission = float(d.get('commission', 0))
+        trade_date = d.get('trade_date', '')
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid request data.'}), 400
 
     conn = get_db()
+    conn.execute('BEGIN IMMEDIATE')
     pos  = conn.execute(
         'SELECT * FROM positions WHERE user_id=? AND ticker=?', (uid, ticker)).fetchone()
     if not pos or pos['shares'] < shares - 0.0001:
-        conn.close()
+        conn.execute('ROLLBACK')
         return jsonify({'success': False, 'error': 'Insufficient shares'}), 400
 
     avg        = pos['avg_buy_price']
@@ -785,7 +794,7 @@ def sell():
     conn.execute(
         'INSERT INTO transactions (user_id,ticker,type,shares,price,commission,total,trade_date) VALUES (?,?,?,?,?,?,?,?)',
         (uid, ticker, 'sell', shares, price, commission, gross, trade_date))
-    conn.commit(); conn.close()
+    conn.commit()
     return jsonify({'success': True, 'profit_loss': pl, 'net_profit_loss': net_pl, 'pnl_pct': pl_pct})
 
 
@@ -805,7 +814,6 @@ def edit_position(ticker):
     result = conn.execute(
         'UPDATE positions SET shares=?, avg_buy_price=?, total_invested=? WHERE user_id=? AND ticker=?',
         (shares, avg, total, uid, ticker.upper()))
-    conn.commit(); conn.close()
     if result.rowcount == 0:
         return jsonify({'success': False, 'error': 'Position not found.'}), 404
     return jsonify({'success': True})
@@ -816,7 +824,6 @@ def delete_position(ticker):
     uid  = _uid()
     conn = get_db()
     conn.execute('DELETE FROM positions WHERE user_id=? AND ticker=?', (uid, ticker.upper()))
-    conn.commit(); conn.close()
     return jsonify({'success': True})
 
 
@@ -859,7 +866,6 @@ def edit_transaction(txn_id):
     txn  = conn.execute('SELECT * FROM transactions WHERE id=? AND user_id=?',
                         (txn_id, uid)).fetchone()
     if not txn:
-        conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
     ticker = txn['ticker']
     total  = shares * price + commission if txn['type'] == 'buy' else shares * price
@@ -869,7 +875,6 @@ def edit_transaction(txn_id):
     conn.commit()
     # Recalculate position from all transactions for this ticker
     recalculate_position(conn, uid, ticker)
-    conn.close()
     return jsonify({'success': True, 'recalculated': True})
 
 
@@ -880,7 +885,6 @@ def delete_transaction(txn_id):
     txn  = conn.execute('SELECT * FROM transactions WHERE id=? AND user_id=?',
                         (txn_id, uid)).fetchone()
     if not txn:
-        conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found.'}), 404
     ticker   = txn['ticker']
     txn_type = txn['type']
@@ -904,7 +908,6 @@ def delete_transaction(txn_id):
         conn.commit()
     # Recalculate position from remaining (non-deleted) transactions
     recalculate_position(conn, uid, ticker)
-    conn.close()
     return jsonify({'success': True, 'recalculated': True})
 
 
@@ -917,7 +920,6 @@ def get_deleted_transactions():
         "SELECT * FROM transactions WHERE user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''"
         " ORDER BY deleted_at DESC LIMIT 200",
         (uid,)).fetchall()
-    conn.close()
     return jsonify([dict(r) for r in rows])
 
 
@@ -930,7 +932,6 @@ def restore_transaction(txn_id):
         "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
         (txn_id, uid)).fetchone()
     if not txn:
-        conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found in trash.'}), 404
     ticker   = txn['ticker']
     txn_type = txn['type']
@@ -950,7 +951,6 @@ def restore_transaction(txn_id):
         ''', (uid, ticker, txn['shares'], txn['price']))
         conn.commit()
     recalculate_position(conn, uid, ticker)
-    conn.close()
     return jsonify({'success': True, 'recalculated': True})
 
 
@@ -963,7 +963,6 @@ def permanent_delete_transaction(txn_id):
         "SELECT * FROM transactions WHERE id=? AND user_id=? AND deleted_at IS NOT NULL AND deleted_at!=''",
         (txn_id, uid)).fetchone()
     if not txn:
-        conn.close()
         return jsonify({'success': False, 'error': 'Transaction not found in trash.'}), 404
     ticker   = txn['ticker']
     txn_type = txn['type']
@@ -981,7 +980,6 @@ def permanent_delete_transaction(txn_id):
             )
         ''', (uid, ticker, txn['shares'], txn['price']))
         conn.commit()
-    conn.close()
     return jsonify({'success': True})
 
 
@@ -1005,7 +1003,6 @@ def get_realized_pnl():
         WHERE user_id=? AND (deleted_at IS NULL OR deleted_at='')
         ORDER BY date DESC LIMIT 200
     ''', (uid,)).fetchall()
-    conn.close()
     return jsonify([dict(r) for r in rows])
 
 
@@ -1016,7 +1013,6 @@ def get_transactions():
     rows = conn.execute(
         "SELECT * FROM transactions WHERE user_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY date DESC LIMIT 200",
         (uid,)).fetchall()
-    conn.close()
     return jsonify([dict(r) for r in rows])
 
 
@@ -1037,7 +1033,6 @@ def get_watchlists():
             (wl['id'],)).fetchall()
         result.append({'id': wl['id'], 'name': wl['name'],
                        'tickers': [i['ticker'] for i in items]})
-    conn.close()
     return jsonify(result)
 
 
@@ -1049,7 +1044,6 @@ def rename_watchlist(wl_id):
         return jsonify({'success': False, 'error': 'Name required.'}), 400
     conn = get_db()
     conn.execute('UPDATE watchlists SET name=? WHERE id=? AND user_id=?', (name, wl_id, uid))
-    conn.commit(); conn.close()
     return jsonify({'success': True})
 
 
@@ -1063,7 +1057,6 @@ def add_watchlist_item(wl_id):
     wl   = conn.execute('SELECT id FROM watchlists WHERE id=? AND user_id=?',
                         (wl_id, uid)).fetchone()
     if not wl:
-        conn.close()
         return jsonify({'success': False, 'error': 'Watchlist not found.'}), 404
     try:
         conn.execute('INSERT INTO watchlist_items (watchlist_id,ticker) VALUES (?,?)',
@@ -1071,7 +1064,6 @@ def add_watchlist_item(wl_id):
         conn.commit()
     except sqlite3.IntegrityError:
         pass   # already in list
-    conn.close()
     return jsonify({'success': True})
 
 
@@ -1081,7 +1073,6 @@ def remove_watchlist_item(wl_id, ticker):
     conn = get_db()
     conn.execute('DELETE FROM watchlist_items WHERE watchlist_id=? AND ticker=?',
                  (wl_id, ticker.upper()))
-    conn.commit(); conn.close()
     return jsonify({'success': True})
 
 
@@ -1091,7 +1082,6 @@ def watchlist_prices(wl_id):
     conn = get_db()
     rows = conn.execute(
         'SELECT ticker FROM watchlist_items WHERE watchlist_id=?', (wl_id,)).fetchall()
-    conn.close()
     tickers = [r['ticker'] for r in rows]
     results = {}
     threads = []
